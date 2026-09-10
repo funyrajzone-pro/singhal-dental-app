@@ -40,7 +40,10 @@ export default function App() {
   }, []);
 
   const fetchDoctors = () => {
-    fetch(`${API_BASE}/doctors`).then(res => res.json()).then(data => setDoctorsList(data)).catch(() => {});
+    fetch(`${API_BASE}/doctors`)
+      .then(res => res.json())
+      .then(data => setDoctorsList(Array.isArray(data) ? data : []))
+      .catch(() => setDoctorsList([]));
   };
 
   const handleImageUpload = (e, callback) => {
@@ -57,34 +60,38 @@ export default function App() {
     const endpoint = role === 'PATIENT' ? '/patient/login' : role === 'DOCTOR' ? '/doctor/login' : '/admin/login';
     const payload = role === 'PATIENT' ? { patientId: loginId, password: loginPass } : { id: loginId, password: loginPass };
 
-    const res = await fetch(`${API_BASE}${endpoint}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
-    const data = await res.json();
+    try {
+      const res = await fetch(`${API_BASE}${endpoint}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
 
-    if (res.ok) {
-      setAuthToken(data.token);
-      setUserRole(role);
-      if (data.is_first_login) {
-        setView('FORCE_CHANGE_PASS');
-      } else {
-        if (role === 'PATIENT') {
-          setPatient(data.patient);
-          setView('PATIENT_DASH');
-          fetchPatientHistory(data.patient.id, data.token);
-        } else if (role === 'DOCTOR') {
-          setDoctor(data.doctor);
-          setView('DOCTOR_DASH');
-          fetchDoctorData(data.doctor.id, data.token);
-        } else if (role === 'ADMIN') {
-          setView('ADMIN_DASH');
-          fetchAdminData(data.token);
+      if (res.ok) {
+        setAuthToken(data.token);
+        setUserRole(role);
+        if (data.is_first_login) {
+          setView('FORCE_CHANGE_PASS');
+        } else {
+          if (role === 'PATIENT') {
+            setPatient(data.patient);
+            setView('PATIENT_DASH');
+            fetchPatientHistory(data.patient.id, data.token);
+          } else if (role === 'DOCTOR') {
+            setDoctor(data.doctor);
+            setView('DOCTOR_DASH');
+            fetchDoctorData(data.doctor.id, data.token);
+          } else if (role === 'ADMIN') {
+            setView('ADMIN_DASH');
+            fetchAdminData(data.token);
+          }
         }
+      } else {
+        alert(data.error || 'Login failed');
       }
-    } else {
-      alert(data.error);
+    } catch (err) {
+      alert('Network error during login');
     }
   };
 
@@ -120,7 +127,10 @@ export default function App() {
 
   const fetchPatientHistory = async (id, token = authToken) => {
     const res = await fetch(`${API_BASE}/patient/${id}/history`, { headers: { 'Authorization': `Bearer ${token}` } });
-    if (res.ok) setPatientHistory(await res.json());
+    if (res.ok) {
+      const data = await res.json();
+      setPatientHistory(Array.isArray(data) ? data : []);
+    }
   };
 
   const saveDoctorProfile = async (profileData) => {
@@ -149,16 +159,16 @@ export default function App() {
   };
 
   // Filtered Patients and Appointments Search
-  const filteredPatients = patientList.filter(p =>
-    p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    p.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    p.mobile.includes(searchQuery)
+  const filteredPatients = (patientList || []).filter(p =>
+    (p.name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+    (p.id || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+    (p.mobile || '').includes(searchQuery)
   );
 
-  const filteredAppointments = allAppointments.filter(a =>
-    a.patient_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    a.patientId.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    a.doctor_name.toLowerCase().includes(searchQuery.toLowerCase())
+  const filteredAppointments = (allAppointments || []).filter(a =>
+    (a.patient_name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+    (a.patientId || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+    (a.doctor_name || '').toLowerCase().includes(searchQuery.toLowerCase())
   );
 
   return (
@@ -167,7 +177,7 @@ export default function App() {
         
         <header style={{ borderBottom: '2px solid #0056b3', paddingBottom: '15px', marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <h1 style={{ margin: 0, color: '#0056b3', fontSize: '28px' }}>Singhal Dental Clinic</h1>
-          {authToken && <button onClick={() => { setView('LANDING'); setAuthToken(''); setSearchQuery(''); }} style={{ backgroundColor: '#dc3545', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: '5px', cursor: 'pointer' }}>Logout</button>}
+          {authToken && <button onClick={() => { setView('LANDING'); setAuthToken(''); setSearchQuery(''); setPatient(null); setDoctor(null); }} style={{ backgroundColor: '#dc3545', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: '5px', cursor: 'pointer' }}>Logout</button>}
         </header>
 
         {/* LANDING VIEW */}
@@ -240,6 +250,97 @@ export default function App() {
           </div>
         )}
 
+        {/* PATIENT DASHBOARD & APPOINTMENT BOOKING FORM */}
+        {view === 'PATIENT_DASH' && patient && (
+          <div>
+            <h2>Welcome, {patient.name} ({patient.id})</h2>
+
+            <div style={{ backgroundColor: '#f8f9fa', padding: '20px', borderRadius: '8px', marginBottom: '25px', border: '1px solid #e0e0e0' }}>
+              <h3>Book New Appointment</h3>
+              <form onSubmit={async (e) => {
+                e.preventDefault();
+                const res = await fetch(`${API_BASE}/patient/book-appointment`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${authToken}` },
+                  body: JSON.stringify({ patientId: patient.id, doctorId: selectedDoctor, date: bookingDate, slot: selectedSlot, problem: problemDesc })
+                });
+                if (res.ok) {
+                  alert('Appointment Booked Successfully!');
+                  setSelectedDoctor(''); setBookingDate(''); setAvailableSlots([]); setSelectedSlot(''); setProblemDesc('');
+                  fetchPatientHistory(patient.id);
+                } else {
+                  alert('Booking Failed!');
+                }
+              }}>
+                <label><strong>Select Doctor:</strong></label>
+                <select value={selectedDoctor} onChange={e => setSelectedDoctor(e.target.value)} required style={inputStyle}>
+                  <option value="">-- Choose Doctor --</option>
+                  {(doctorsList || []).map(doc => (
+                    <option key={doc.id} value={doc.id}>{doc.name} ({doc.specialties?.join(', ') || 'General'})</option>
+                  ))}
+                </select>
+
+                <label><strong>Select Date:</strong></label>
+                <input type="date" value={bookingDate} onChange={async (e) => {
+                  const date = e.target.value;
+                  setBookingDate(date);
+                  if (selectedDoctor && date) {
+                    const res = await fetch(`${API_BASE}/patient/available-slots?doctorId=${selectedDoctor}&date=${date}`, {
+                      headers: { 'Authorization': `Bearer ${authToken}` }
+                    });
+                    if (res.ok) {
+                      const slots = await res.json();
+                      setAvailableSlots(Array.isArray(slots) ? slots : []);
+                    }
+                  }
+                }} required style={inputStyle} />
+
+                {(availableSlots || []).length > 0 && (
+                  <div>
+                    <label><strong>Available Slots:</strong></label>
+                    <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', margin: '10px 0' }}>
+                      {(availableSlots || []).map(slot => (
+                        <button type="button" key={slot} onClick={() => setSelectedSlot(slot)} style={{ ...btnSecondaryStyle, backgroundColor: selectedSlot === slot ? '#28a745' : '#6c757d' }}>
+                          {slot}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <label><strong>Describe Your Dental Problem:</strong></label>
+                <textarea value={problemDesc} onChange={e => setProblemDesc(e.target.value)} placeholder="e.g. Tooth pain, Root Canal consult..." required style={{ ...inputStyle, height: '70px' }} />
+
+                <button type="submit" style={btnPrimaryStyle}>Confirm Appointment</button>
+              </form>
+            </div>
+
+            <h3>Your Past Appointments & Prescriptions</h3>
+            <table border="1" cellPadding="10" style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
+              <thead style={{ backgroundColor: '#f2f2f2' }}>
+                <tr>
+                  <th>Date & Slot</th>
+                  <th>Doctor</th>
+                  <th>Problem</th>
+                  <th>Diagnosis / Remark</th>
+                  <th>Fee & Payment</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(patientHistory || []).map(hist => (
+                  <tr key={hist.id}>
+                    <td>{hist.appointment_date?.split('T')[0]} ({hist.time_slot})</td>
+                    <td>{hist.doctor_name}</td>
+                    <td>{hist.problem}</td>
+                    <td>{hist.doctor_remark || 'Pending Diagnosis'}</td>
+                    <td>Total: ₹{hist.total_fee || 0} | Paid: ₹{hist.deposit_amount || 0}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
         {/* DOCTOR LOGIN */}
         {view === 'DOCTOR_LOGIN' && (
           <div style={{ maxWidth: '400px', margin: 'auto' }}>
@@ -266,13 +367,13 @@ export default function App() {
           </div>
         )}
 
-        {/* DOCTOR & ADMIN DASHBOARDS (WITH PATIENT & APPOINTMENTS TAB + SEARCH) */}
+        {/* DOCTOR & ADMIN DASHBOARDS */}
         {(view === 'ADMIN_DASH' || view === 'DOCTOR_DASH') && (
           <div>
             <div style={{ display: 'flex', gap: '10px', borderBottom: '2px solid #ccc', paddingBottom: '10px', marginBottom: '20px' }}>
               <button onClick={() => setActiveTab('APPOINTMENTS')} style={{ ...tabBtnStyle, backgroundColor: activeTab === 'APPOINTMENTS' ? '#0056b3' : '#e9ecef', color: activeTab === 'APPOINTMENTS' ? '#fff' : '#333' }}>Appointment List</button>
               <button onClick={() => setActiveTab('PATIENTS')} style={{ ...tabBtnStyle, backgroundColor: activeTab === 'PATIENTS' ? '#0056b3' : '#e9ecef', color: activeTab === 'PATIENTS' ? '#fff' : '#333' }}>Patient List & Search</button>
-              {view === 'ADMIN_DASH' && <button onClick={() => setActiveTab('DOCTORS')} style={{ ...tabBtnStyle, backgroundColor: activeTab === 'DOCTORS' ? '#0056b3' : '#e9ecef', color: activeTab === 'DOCTORS' ? '#fff' : '#333' }}>Doctors List ({doctorsList.length})</button>}
+              {view === 'ADMIN_DASH' && <button onClick={() => setActiveTab('DOCTORS')} style={{ ...tabBtnStyle, backgroundColor: activeTab === 'DOCTORS' ? '#0056b3' : '#e9ecef', color: activeTab === 'DOCTORS' ? '#fff' : '#333' }}>Doctors List ({(doctorsList || []).length})</button>}
             </div>
 
             {/* TAB 1: APPOINTMENTS LIST */}
@@ -291,11 +392,11 @@ export default function App() {
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredAppointments.map(app => (
+                    {(filteredAppointments || []).map(app => (
                       <tr key={app.id}>
                         <td>{app.patient_name} ({app.patientId})</td>
                         <td>{app.doctor_name}</td>
-                        <td>{app.appointment_date.split('T')[0]} ({app.time_slot})</td>
+                        <td>{app.appointment_date?.split('T')[0]} ({app.time_slot})</td>
                         <td>{app.problem}</td>
                         <td><button onClick={() => setSelectedPatientRecord(app)} style={btnPrimaryStyle}>View/Edit Details</button></td>
                       </tr>
@@ -305,7 +406,7 @@ export default function App() {
               </div>
             )}
 
-            {/* TAB 2: PATIENTS LIST WITH SEARCH */}
+            {/* TAB 2: PATIENTS LIST */}
             {activeTab === 'PATIENTS' && (
               <div>
                 <h3>Registered Patients Search</h3>
@@ -322,7 +423,7 @@ export default function App() {
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredPatients.map(p => (
+                    {(filteredPatients || []).map(p => (
                       <tr key={p.id}>
                         <td>{p.photoBase64 ? <img src={p.photoBase64} alt="" style={{ width: '40px', height: '40px', borderRadius: '50%' }} /> : 'No Image'}</td>
                         <td><strong>{p.id}</strong></td>
@@ -337,12 +438,12 @@ export default function App() {
               </div>
             )}
 
-            {/* TAB 3: DOCTORS MANAGEMENT (ADMIN ONLY) */}
+            {/* TAB 3: DOCTORS MANAGEMENT */}
             {activeTab === 'DOCTORS' && view === 'ADMIN_DASH' && (
               <div>
                 <h3>Manage Doctors Profiles</h3>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '20px' }}>
-                  {doctorsList.map(doc => (
+                  {(doctorsList || []).map(doc => (
                     <div key={doc.id} style={{ border: '1px solid #ddd', padding: '15px', borderRadius: '8px', backgroundColor: '#fff' }}>
                       {doc.photoBase64 && <img src={doc.photoBase64} alt="" style={{ width: '70px', height: '70px', borderRadius: '50%' }} />}
                       <h4>{doc.name} ({doc.id})</h4>
@@ -361,7 +462,7 @@ export default function App() {
           </div>
         )}
 
-        {/* EDIT DOCTOR MODAL POPUP (PRE-FILLED DATA) */}
+        {/* EDIT DOCTOR MODAL */}
         {editDocModal && (
           <div style={modalOverlayStyle}>
             <div style={modalContentStyle}>
@@ -389,7 +490,7 @@ export default function App() {
           </div>
         )}
 
-        {/* VIEW/EDIT APPOINTMENT DETAILS MODAL */}
+        {/* EDIT APPOINTMENT MODAL */}
         {selectedPatientRecord && (
           <div style={modalOverlayStyle}>
             <div style={modalContentStyle}>
