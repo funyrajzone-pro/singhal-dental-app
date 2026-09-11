@@ -4,7 +4,7 @@ const API_BASE = process.env.REACT_APP_API_URL || '/api';
 
 export default function App() {
   const [view, setView] = useState('LANDING');
-  const [activeTab, setActiveTab] = useState('APPOINTMENTS'); // APPOINTMENTS, PATIENTS, DOCTORS
+  const [activeTab, setActiveTab] = useState('APPOINTMENTS');
   const [userRole, setUserRole] = useState('');
   const [patient, setPatient] = useState(null);
   const [doctor, setDoctor] = useState(null);
@@ -75,13 +75,14 @@ export default function App() {
           setView('FORCE_CHANGE_PASS');
         } else {
           if (role === 'PATIENT') {
-            setPatient(data.patient);
+            const currentPatient = data.patient || { id: loginId, name: 'Patient' };
+            setPatient(currentPatient);
             setView('PATIENT_DASH');
-            fetchPatientHistory(data.patient.id, data.token);
+            fetchPatientHistory(currentPatient.id, data.token);
           } else if (role === 'DOCTOR') {
-            setDoctor(data.doctor);
+            setDoctor(data.doctor || { id: loginId });
             setView('DOCTOR_DASH');
-            fetchDoctorData(data.doctor.id, data.token);
+            fetchDoctorData(loginId, data.token);
           } else if (role === 'ADMIN') {
             setView('ADMIN_DASH');
             fetchAdminData(data.token);
@@ -106,8 +107,8 @@ export default function App() {
     if (res.ok) {
       alert('Password Updated Successfully!');
       if (userRole === 'PATIENT') setView('PATIENT_DASH');
-      else if (userRole === 'DOCTOR') { setView('DOCTOR_DASH'); fetchDoctorData(doctor.id); }
-      else { setView('ADMIN_DASH'); fetchAdminData(); }
+      else if (userRole === 'DOCTOR') setView('DOCTOR_DASH');
+      else setView('ADMIN_DASH');
     } else alert('Failed to update password');
   };
 
@@ -126,39 +127,17 @@ export default function App() {
   };
 
   const fetchPatientHistory = async (id, token = authToken) => {
-    const res = await fetch(`${API_BASE}/patient/${id}/history`, { headers: { 'Authorization': `Bearer ${token}` } });
-    if (res.ok) {
-      const data = await res.json();
-      setPatientHistory(Array.isArray(data) ? data : []);
+    try {
+      const res = await fetch(`${API_BASE}/patient/${id}/history`, { headers: { 'Authorization': `Bearer ${token}` } });
+      if (res.ok) {
+        const data = await res.json();
+        setPatientHistory(Array.isArray(data) ? data : []);
+      }
+    } catch (e) {
+      setPatientHistory([]);
     }
   };
 
-  const saveDoctorProfile = async (profileData) => {
-    const res = await fetch(`${API_BASE}/doctor/update-profile`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${authToken}` },
-      body: JSON.stringify(profileData)
-    });
-    if (res.ok) {
-      alert('Profile Updated Successfully!');
-      fetchDoctors();
-      setEditDocModal(null);
-    } else alert('Update Failed');
-  };
-
-  const deleteDoctor = async (id) => {
-    if (!window.confirm('Are you sure you want to delete this Doctor?')) return;
-    const res = await fetch(`${API_BASE}/doctor/delete/${id}`, {
-      method: 'DELETE',
-      headers: { 'Authorization': `Bearer ${authToken}` }
-    });
-    if (res.ok) {
-      alert('Doctor Deleted');
-      fetchDoctors();
-    }
-  };
-
-  // Filtered Patients and Appointments Search
   const filteredPatients = (patientList || []).filter(p =>
     (p.name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
     (p.id || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -192,7 +171,7 @@ export default function App() {
           </div>
         )}
 
-        {/* PATIENT LOGIN & REGISTRATION */}
+        {/* PATIENT LOGIN */}
         {view === 'PATIENT_LOGIN' && (
           <div style={{ maxWidth: '400px', margin: 'auto' }}>
             <h2>Patient Login</h2>
@@ -206,6 +185,7 @@ export default function App() {
           </div>
         )}
 
+        {/* PATIENT REGISTRATION */}
         {view === 'PATIENT_REG' && (
           <div style={{ maxWidth: '500px', margin: 'auto' }}>
             <h2>New Patient Registration</h2>
@@ -222,7 +202,7 @@ export default function App() {
                 <input placeholder="Address" onChange={e => setRegData({...regData, address: e.target.value})} required style={inputStyle} />
                 <input placeholder="Mobile Number" onChange={e => setRegData({...regData, mobile: e.target.value})} required style={inputStyle} />
                 <input type="date" onChange={e => setRegData({...regData, dob: e.target.value})} required style={inputStyle} />
-                <label><strong>Patient Photo (Mobile Camera / Upload):</strong></label>
+                <label><strong>Patient Photo:</strong></label>
                 <input type="file" accept="image/*" capture="user" onChange={(e) => handleImageUpload(e, (base64) => setRegData({...regData, photoBase64: base64}))} style={inputStyle} />
                 {regData.photoBase64 && <img src={regData.photoBase64} alt="Preview" style={{ width: '80px', height: '80px', borderRadius: '5px' }} />}
                 <button type="submit" style={btnPrimaryStyle}>Submit Registration</button>
@@ -250,24 +230,25 @@ export default function App() {
           </div>
         )}
 
-        {/* PATIENT DASHBOARD & APPOINTMENT BOOKING FORM */}
-        {view === 'PATIENT_DASH' && patient && (
+        {/* PATIENT DASHBOARD (DIRECT RENDERING FIXED) */}
+        {view === 'PATIENT_DASH' && (
           <div>
-            <h2>Welcome, {patient.name} ({patient.id})</h2>
+            <h2>Patient Dashboard</h2>
+            <p><strong>Welcome:</strong> {patient?.name || loginId} ({patient?.id || loginId})</p>
 
             <div style={{ backgroundColor: '#f8f9fa', padding: '20px', borderRadius: '8px', marginBottom: '25px', border: '1px solid #e0e0e0' }}>
-              <h3>Book New Appointment</h3>
+              <h3 style={{ color: '#0056b3' }}>Book New Appointment</h3>
               <form onSubmit={async (e) => {
                 e.preventDefault();
                 const res = await fetch(`${API_BASE}/patient/book-appointment`, {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${authToken}` },
-                  body: JSON.stringify({ patientId: patient.id, doctorId: selectedDoctor, date: bookingDate, slot: selectedSlot, problem: problemDesc })
+                  body: JSON.stringify({ patientId: patient?.id || loginId, doctorId: selectedDoctor, date: bookingDate, slot: selectedSlot, problem: problemDesc })
                 });
                 if (res.ok) {
                   alert('Appointment Booked Successfully!');
                   setSelectedDoctor(''); setBookingDate(''); setAvailableSlots([]); setSelectedSlot(''); setProblemDesc('');
-                  fetchPatientHistory(patient.id);
+                  fetchPatientHistory(patient?.id || loginId);
                 } else {
                   alert('Booking Failed!');
                 }
@@ -311,11 +292,11 @@ export default function App() {
                 <label><strong>Describe Your Dental Problem:</strong></label>
                 <textarea value={problemDesc} onChange={e => setProblemDesc(e.target.value)} placeholder="e.g. Tooth pain, Root Canal consult..." required style={{ ...inputStyle, height: '70px' }} />
 
-                <button type="submit" style={btnPrimaryStyle}>Confirm Appointment</button>
+                <button type="submit" style={{ ...btnPrimaryStyle, marginTop: '10px' }}>Confirm Appointment</button>
               </form>
             </div>
 
-            <h3>Your Past Appointments & Prescriptions</h3>
+            <h3>Your Appointments & Prescriptions History</h3>
             <table border="1" cellPadding="10" style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
               <thead style={{ backgroundColor: '#f2f2f2' }}>
                 <tr>
@@ -367,16 +348,15 @@ export default function App() {
           </div>
         )}
 
-        {/* DOCTOR & ADMIN DASHBOARDS */}
+        {/* ADMIN & DOCTOR DASHBOARDS */}
         {(view === 'ADMIN_DASH' || view === 'DOCTOR_DASH') && (
           <div>
             <div style={{ display: 'flex', gap: '10px', borderBottom: '2px solid #ccc', paddingBottom: '10px', marginBottom: '20px' }}>
               <button onClick={() => setActiveTab('APPOINTMENTS')} style={{ ...tabBtnStyle, backgroundColor: activeTab === 'APPOINTMENTS' ? '#0056b3' : '#e9ecef', color: activeTab === 'APPOINTMENTS' ? '#fff' : '#333' }}>Appointment List</button>
               <button onClick={() => setActiveTab('PATIENTS')} style={{ ...tabBtnStyle, backgroundColor: activeTab === 'PATIENTS' ? '#0056b3' : '#e9ecef', color: activeTab === 'PATIENTS' ? '#fff' : '#333' }}>Patient List & Search</button>
-              {view === 'ADMIN_DASH' && <button onClick={() => setActiveTab('DOCTORS')} style={{ ...tabBtnStyle, backgroundColor: activeTab === 'DOCTORS' ? '#0056b3' : '#e9ecef', color: activeTab === 'DOCTORS' ? '#fff' : '#333' }}>Doctors List ({(doctorsList || []).length})</button>}
+              {view === 'ADMIN_DASH' && <button onClick={() => setActiveTab('DOCTORS')} style={{ ...tabBtnStyle, backgroundColor: activeTab === 'DOCTORS' ? '#0056b3' : '#e9ecef', color: activeTab === 'DOCTORS' ? '#fff' : '#333' }}>Doctors List</button>}
             </div>
 
-            {/* TAB 1: APPOINTMENTS LIST */}
             {activeTab === 'APPOINTMENTS' && (
               <div>
                 <h3>Appointments List</h3>
@@ -406,11 +386,10 @@ export default function App() {
               </div>
             )}
 
-            {/* TAB 2: PATIENTS LIST */}
             {activeTab === 'PATIENTS' && (
               <div>
-                <h3>Registered Patients Search</h3>
-                <input placeholder="Search Patient by Name, ID (SDC1001), or Mobile..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} style={{ ...inputStyle, width: '100%', marginBottom: '15px' }} />
+                <h3>Registered Patients</h3>
+                <input placeholder="Search Patient..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} style={{ ...inputStyle, width: '100%', marginBottom: '15px' }} />
                 <table border="1" cellPadding="10" style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
                   <thead style={{ backgroundColor: '#f2f2f2' }}>
                     <tr>
@@ -437,103 +416,6 @@ export default function App() {
                 </table>
               </div>
             )}
-
-            {/* TAB 3: DOCTORS MANAGEMENT */}
-            {activeTab === 'DOCTORS' && view === 'ADMIN_DASH' && (
-              <div>
-                <h3>Manage Doctors Profiles</h3>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '20px' }}>
-                  {(doctorsList || []).map(doc => (
-                    <div key={doc.id} style={{ border: '1px solid #ddd', padding: '15px', borderRadius: '8px', backgroundColor: '#fff' }}>
-                      {doc.photoBase64 && <img src={doc.photoBase64} alt="" style={{ width: '70px', height: '70px', borderRadius: '50%' }} />}
-                      <h4>{doc.name} ({doc.id})</h4>
-                      <p><strong>Qualifications:</strong> {doc.qualifications}</p>
-                      <p><strong>Specialties:</strong> {doc.specialties?.join(', ')}</p>
-                      <p><em>{doc.experience}</em></p>
-                      <div style={{ display: 'flex', gap: '10px' }}>
-                        <button onClick={() => setEditDocModal(doc)} style={{ ...btnPrimaryStyle, backgroundColor: '#ffc107', color: '#000' }}>Edit Profile Data</button>
-                        <button onClick={() => deleteDoctor(doc.id)} style={{ ...btnPrimaryStyle, backgroundColor: '#dc3545' }}>Delete</button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* EDIT DOCTOR MODAL */}
-        {editDocModal && (
-          <div style={modalOverlayStyle}>
-            <div style={modalContentStyle}>
-              <h3>Edit Doctor Profile: {editDocModal.name}</h3>
-              <label>Doctor Name:</label>
-              <input value={editDocModal.name} onChange={e => setEditDocModal({ ...editDocModal, name: e.target.value })} style={inputStyle} />
-
-              <label>Qualifications:</label>
-              <input value={editDocModal.qualifications} onChange={e => setEditDocModal({ ...editDocModal, qualifications: e.target.value })} style={inputStyle} />
-
-              <label>Specialties (Comma Separated):</label>
-              <input value={editDocModal.specialties?.join(', ')} onChange={e => setEditDocModal({ ...editDocModal, specialties: e.target.value.split(',').map(s => s.trim()) })} style={inputStyle} />
-
-              <label>Experience Details:</label>
-              <textarea value={editDocModal.experience} onChange={e => setEditDocModal({ ...editDocModal, experience: e.target.value })} style={{ ...inputStyle, height: '60px' }} />
-
-              <label>Update Photo:</label>
-              <input type="file" accept="image/*" capture="user" onChange={(e) => handleImageUpload(e, (base64) => setEditDocModal({ ...editDocModal, photoBase64: base64 }))} style={inputStyle} />
-
-              <div style={{ display: 'flex', gap: '10px', marginTop: '15px' }}>
-                <button onClick={() => saveDoctorProfile(editDocModal)} style={btnPrimaryStyle}>Save & Update Profile</button>
-                <button onClick={() => setEditDocModal(null)} style={btnSecondaryStyle}>Cancel</button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* EDIT APPOINTMENT MODAL */}
-        {selectedPatientRecord && (
-          <div style={modalOverlayStyle}>
-            <div style={modalContentStyle}>
-              <h3>Appointment & Medical Record</h3>
-              <p><strong>Patient Name:</strong> {selectedPatientRecord.patient_name} ({selectedPatientRecord.patientId})</p>
-              <p><strong>Doctor:</strong> {selectedPatientRecord.doctor_name}</p>
-              <p><strong>Problem:</strong> {selectedPatientRecord.problem}</p>
-
-              <label>Doctor Remark/Diagnosis:</label>
-              <textarea defaultValue={selectedPatientRecord.doctor_remark} id="editRemark" style={{ ...inputStyle, height: '60px' }} />
-
-              <div style={{ display: 'flex', gap: '10px' }}>
-                <div>
-                  <label>Total Fee (₹):</label>
-                  <input type="number" defaultValue={selectedPatientRecord.total_fee} id="editTotalFee" style={inputStyle} />
-                </div>
-                <div>
-                  <label>Deposit Amount (₹):</label>
-                  <input type="number" defaultValue={selectedPatientRecord.deposit_amount} id="editDeposit" style={inputStyle} />
-                </div>
-              </div>
-
-              <div style={{ display: 'flex', gap: '10px', marginTop: '15px' }}>
-                <button onClick={async () => {
-                  const remark = document.getElementById('editRemark').value;
-                  const totalFee = document.getElementById('editTotalFee').value;
-                  const deposit = document.getElementById('editDeposit').value;
-
-                  const res = await fetch(`${API_BASE}/doctor/appointment/update-details`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${authToken}` },
-                    body: JSON.stringify({ appointmentId: selectedPatientRecord.id, doctorRemark: remark, totalFee, depositAmount: deposit })
-                  });
-                  if (res.ok) {
-                    alert('Record Saved!');
-                    setSelectedPatientRecord(null);
-                    if (userRole === 'ADMIN') fetchAdminData();
-                    else fetchDoctorData(doctor.id);
-                  }
-                }} style={btnPrimaryStyle}>Save Record</button>
-                <button onClick={() => setSelectedPatientRecord(null)} style={btnSecondaryStyle}>Close</button>
-              </div>
-            </div>
           </div>
         )}
 
@@ -547,5 +429,3 @@ const inputStyle = { width: '100%', padding: '10px', margin: '8px 0', border: '1
 const btnPrimaryStyle = { backgroundColor: '#0056b3', color: '#fff', border: 'none', padding: '10px 18px', borderRadius: '5px', cursor: 'pointer' };
 const btnSecondaryStyle = { backgroundColor: '#6c757d', color: '#fff', border: 'none', padding: '10px 18px', borderRadius: '5px', cursor: 'pointer' };
 const tabBtnStyle = { padding: '10px 20px', border: 'none', borderRadius: '5px', cursor: 'pointer', fontWeight: 'bold' };
-const modalOverlayStyle = { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 };
-const modalContentStyle = { backgroundColor: '#fff', padding: '25px', borderRadius: '8px', maxWidth: '500px', width: '90%' };
