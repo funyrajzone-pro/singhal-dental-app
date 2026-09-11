@@ -2,25 +2,59 @@ const express = require('express');
 const cors = require('cors');
 const jwt = require('jwt-simple');
 const path = require('path');
+const fs = require('fs');
+const multer = require('multer');
+
 const app = express();
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your_jwt_secret_key_123';
 
+// ---------------------------------------------------------
+// File Storage & Multer Setup
+// ---------------------------------------------------------
+const uploadDir = path.join(__dirname, 'uploads');
+if (!fs.existsSync(uploadDir)) {
+  fs.mkdirSync(uploadDir, { recursive: true });
+}
+
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, uploadDir);
+  },
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
+    cb(null, uniqueSuffix + path.extname(file.originalname));
+  }
+});
+
+const upload = multer({
+  storage: storage,
+  limits: { fileSize: 10 * 1024 * 1024 } // 10MB limit
+});
+
+// ---------------------------------------------------------
+// Middlewares
+// ---------------------------------------------------------
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 app.use(cors());
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
-// Initial Doctors Data
-let doctors = [
+// ---------------------------------------------------------
+// In-Memory Database / Mock Data State
+// ---------------------------------------------------------
+let doctorsDB = [
   {
     id: 'DOC101',
     name: 'Dr. Himanshu Singhal',
     qualifications: 'B.D.S, F.I.O., MIDA (Reg. - A9948)',
-    specialties: ['मुख एवं दन्त रोग विशेषज्ञ', 'फैलोशिप इन ऑर्थोडोंटिक (ए.एफ.ओ.)', 'इम्प्लांटोलॉजिस्ट'],
-    experience: 'पूर्व चिकित्सा अधिकारी सी.एच.सी. मऊ, पूर्व चिकित्सक ॐ डेन्टल केयर मोदीनगर',
+    specialties: ['Orthodontics', 'Implantology', 'मुख एवं दन्त रोग विशेषज्ञ'],
+    experience: '10+ Years',
+    photoUrl: '',
     photoBase64: '',
     is_first_login: true,
-    password: 'DefaultPassword123'
+    password: 'DefaultPassword123',
+    slotConfig: { startHour: 10, totalSlots: 15, intervalMins: 16 }
   },
   {
     id: 'DOC102',
@@ -28,29 +62,35 @@ let doctors = [
     qualifications: 'B.D.S, FIFA, MIDA (Reg. - A3726)',
     specialties: ['मुख एवं दन्त रोग विशेषज्ञ', 'फैलोशिप इन फेशियल एस्थेटिक्स', 'इम्प्लांटोलॉजिस्ट'],
     experience: 'पूर्व चिकि. आशा डेन्टल क्लीनिक ग्वालियर',
+    photoUrl: '',
     photoBase64: '',
     is_first_login: true,
-    password: 'DefaultPassword123'
+    password: 'DefaultPassword123',
+    slotConfig: { startHour: 10, totalSlots: 15, intervalMins: 16 }
   },
   {
     id: 'DOC103',
     name: 'Dr. Piyush Singhal',
     qualifications: 'BDS, PGC, PGDC, MIDA (Reg. - A2248)',
-    specialties: ['मुख एवं दन्त रोग विशेषज्ञ', 'डेन्टल इम्प्लांट स्पेशलिस्ट', 'सर्टिफाइड बेसल इम्प्लांटोलॉजिस्ट IFFI', 'Zygomatic Dental Implant Master'],
-    experience: 'पी.जी.सी. इन बेसल इम्प्लांटोलॉजी, Life Member of Indian Society of Oral Implantologists',
+    specialties: ['मुख एवं दन्त रोग विशेषज्ञ', 'डेन्टल इम्प्लांट स्पेशलिस्ट', 'सर्टिफाइड बेसल इम्प्लांटोलॉजिस्ट IFFI'],
+    experience: 'पी.जी.सी. इन बेसल इम्प्लांटोलॉजी',
+    photoUrl: '',
     photoBase64: '',
     is_first_login: true,
-    password: 'DefaultPassword123'
+    password: 'DefaultPassword123',
+    slotConfig: { startHour: 10, totalSlots: 15, intervalMins: 16 }
   },
   {
     id: 'DOC104',
     name: 'Dr. Sonali Gupta Singhal',
     qualifications: 'B.D.S, MIDA (Reg. - A1375)',
     specialties: ['मुख एवं दन्त रोग विशेषज्ञ'],
-    experience: 'पूर्व चिकि. न्यू होराइजन डेन्टल कॉलेज बिलासपुर, पूर्व चिकित्सक त्रिपाठी दंत चिकित्सालय बिलासपुर',
+    experience: 'पूर्व चिकि. न्यू होराइजन डेन्टल कॉलेज बिलासपुर',
+    photoUrl: '',
     photoBase64: '',
     is_first_login: true,
-    password: 'DefaultPassword123'
+    password: 'DefaultPassword123',
+    slotConfig: { startHour: 10, totalSlots: 15, intervalMins: 16 }
   }
 ];
 
@@ -60,26 +100,20 @@ let adminUser = {
   is_first_login: true
 };
 
-let patients = [];
-let appointments = [];
-let patientIdCounter = 1001;
+let patientsDB = [
+  { id: 'SDC1001', name: 'SDC1001 Patient', guardianName: 'Guardian Name', mobile: '9876543210', address: 'Jhansi', password: 'Pass1001', is_first_login: true }
+];
 
-function generate15MorningSlots() {
-  const slots = [];
-  let startTime = 10 * 60;
-  const interval = 16;
-  for (let i = 0; i < 15; i++) {
-    let hrs = Math.floor(startTime / 60);
-    let mins = startTime % 60;
-    let period = hrs >= 12 ? 'PM' : 'AM';
-    let displayHrs = hrs > 12 ? hrs - 12 : hrs;
-    let formattedMins = mins < 10 ? `0${mins}` : mins;
-    slots.push(`${displayHrs}:${formattedMins} ${period}`);
-    startTime += interval;
-  }
-  return slots;
-}
+let appointmentsDB = [];
+let patientIdCounter = 1002;
+let appointmentCounter = 5001;
 
+// Default Slots Fallback
+const defaultTimeSlots = ['10:00 AM - 11:00 AM', '11:30 AM - 12:30 PM', '04:00 PM - 05:00 PM', '05:30 PM - 06:30 PM'];
+
+// ---------------------------------------------------------
+// Authentication Middlewares
+// ---------------------------------------------------------
 const authenticateToken = (req, res, next) => {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
@@ -90,42 +124,69 @@ const authenticateToken = (req, res, next) => {
     req.user = decoded;
     next();
   } catch (err) {
-    return res.status(403).json({ error: 'Invalid token' });
+    return res.status(403).json({ error: 'Invalid or expired token' });
   }
 };
 
-// APIs
+const authorizeRoles = (...roles) => {
+  return (req, res, next) => {
+    if (!roles.includes(req.user.role)) {
+      return res.status(403).json({ error: 'Access denied: Unauthorized role' });
+    }
+    next();
+  };
+};
+
+// ---------------------------------------------------------
+// PUBLIC ROUTES & DOCTORS LIST
+// ---------------------------------------------------------
+
+// Doctors List Route
 app.get('/api/doctors', (req, res) => {
-  const publicDocList = doctors.map(({ password, ...doc }) => doc);
+  const publicDocList = doctorsDB.map(({ password, ...doc }) => doc);
   res.json(publicDocList);
 });
 
-app.post('/api/patient/register', (req, res) => {
+app.get('/api/doctors/:id', (req, res) => {
+  const doc = doctorsDB.find(d => d.id === req.params.id);
+  if (!doc) return res.status(404).json({ error: 'Doctor not found' });
+  const { password, ...docData } = doc;
+  res.json(docData);
+});
+
+// ---------------------------------------------------------
+// AUTHENTICATION ENDPOINTS
+// ---------------------------------------------------------
+
+app.post('/api/patient/register', upload.single('photo'), (req, res) => {
   const { name, guardianName, address, mobile, dob, photoBase64 } = req.body;
   if (!name || !mobile) return res.status(400).json({ error: 'Name and Mobile required' });
 
   const patientId = `SDC${patientIdCounter++}`;
   const defaultPassword = 'Pass' + Math.floor(1000 + Math.random() * 9000);
+  const photoUrl = req.file ? `/uploads/${req.file.filename}` : '';
 
   const newPatient = {
     id: patientId,
     name,
-    guardianName,
-    address,
+    guardianName: guardianName || '',
+    address: address || '',
     mobile,
-    dob,
+    dob: dob || '',
+    photoUrl,
     photoBase64: photoBase64 || '',
     password: defaultPassword,
-    is_first_login: true
+    is_first_login: true,
+    createdAt: new Date().toISOString()
   };
 
-  patients.push(newPatient);
-  res.json({ message: 'Patient registered', patientId, defaultPassword });
+  patientsDB.push(newPatient);
+  res.json({ message: 'Patient registered successfully', patientId, defaultPassword, patient: newPatient });
 });
 
 app.post('/api/patient/login', (req, res) => {
   const { patientId, password } = req.body;
-  const p = patients.find(p => p.id === patientId && p.password === password);
+  const p = patientsDB.find(patient => patient.id === patientId && patient.password === password);
   if (!p) return res.status(401).json({ error: 'Invalid ID or Password' });
 
   const token = jwt.encode({ id: p.id, role: 'PATIENT' }, JWT_SECRET);
@@ -135,7 +196,7 @@ app.post('/api/patient/login', (req, res) => {
 
 app.post('/api/doctor/login', (req, res) => {
   const { id, password } = req.body;
-  const doc = doctors.find(d => d.id === id && d.password === password);
+  const doc = doctorsDB.find(d => d.id === id && d.password === password);
   if (!doc) return res.status(401).json({ error: 'Invalid Credentials' });
 
   const token = jwt.encode({ id: doc.id, role: 'DOCTOR' }, JWT_SECRET);
@@ -153,74 +214,68 @@ app.post('/api/admin/login', (req, res) => {
   }
 });
 
-// Update Passwords
-app.post('/api/patient/update-password', authenticateToken, (req, res) => {
-  const p = patients.find(patient => patient.id === req.user.id);
-  if (!p) return res.status(404).json({ error: 'Patient not found' });
-  p.password = req.body.newPassword;
-  p.is_first_login = false;
-  res.json({ message: 'Password updated' });
+// ---------------------------------------------------------
+// PATIENT APPOINTMENT ROUTES
+// ---------------------------------------------------------
+
+// 1. Available Slots Route
+app.get('/api/patient/available-slots', (req, res) => {
+  const { doctorId, date } = req.query;
+
+  // Filter already booked slots for this doctor on this date
+  const bookedSlots = appointmentsDB
+    .filter(a => a.doctorId === doctorId && a.appointment_date === date && a.status !== 'CANCELLED')
+    .map(a => a.time_slot);
+
+  const available = defaultTimeSlots.filter(s => !bookedSlots.includes(s));
+  res.json(available);
 });
 
-app.post('/api/doctor/update-password', authenticateToken, (req, res) => {
-  const doc = doctors.find(d => d.id === req.user.id);
-  if (!doc) return res.status(404).json({ error: 'Doctor not found' });
-  doc.password = req.body.newPassword;
-  doc.is_first_login = false;
-  res.json({ message: 'Doctor password updated' });
-});
+// 2. Book Appointment Route
+app.post('/api/patient/book-appointment', (req, res) => {
+  const { patientId, doctorId, date, slot, problem } = req.body;
 
-app.post('/api/admin/update-password', authenticateToken, (req, res) => {
-  if (req.user.id !== adminUser.id) return res.status(403).json({ error: 'Unauthorized' });
-  adminUser.password = req.body.newPassword;
-  adminUser.is_first_login = false;
-  res.json({ message: 'Admin password updated' });
-});
+  const doc = doctorsDB.find(d => d.id === doctorId);
+  const patient = patientsDB.find(p => p.id === patientId);
 
-// Update & Delete Doctor Profile Data
-app.post('/api/doctor/update-profile', authenticateToken, (req, res) => {
-  const targetId = req.body.id || req.user.id;
-  const docIndex = doctors.findIndex(d => d.id === targetId);
-  if (docIndex === -1) return res.status(404).json({ error: 'Doctor not found' });
-
-  doctors[docIndex] = {
-    ...doctors[docIndex],
-    name: req.body.name || doctors[docIndex].name,
-    qualifications: req.body.qualifications || doctors[docIndex].qualifications,
-    specialties: req.body.specialties || doctors[docIndex].specialties,
-    experience: req.body.experience || doctors[docIndex].experience,
-    photoBase64: req.body.photoBase64 !== undefined ? req.body.photoBase64 : doctors[docIndex].photoBase64
+  const newAppointment = {
+    id: 'APP_' + Date.now(),
+    patientId: patientId || 'SDC1001',
+    patient_name: req.body.patientName || (patient ? patient.name : 'Patient ' + patientId),
+    doctorId: doctorId,
+    doctor_name: doc ? doc.name : 'Dr. Himanshu Singhal',
+    appointment_date: date,
+    time_slot: slot || '10:00 AM - 11:00 AM',
+    problem: problem || '',
+    doctor_remark: '',
+    total_fee: 0,
+    deposit_amount: 0,
+    balance_amount: 0,
+    status: 'PENDING',
+    createdAt: new Date().toISOString()
   };
 
-  res.json({ message: 'Doctor profile updated', doctor: doctors[docIndex] });
+  appointmentsDB.push(newAppointment);
+  res.status(200).json({ success: true, message: 'Appointment booked successfully', appointment: newAppointment });
 });
 
-app.delete('/api/doctor/delete/:id', authenticateToken, (req, res) => {
-  if (req.user.role !== 'ADMIN') return res.status(403).json({ error: 'Admin access required' });
-  doctors = doctors.filter(d => d.id !== req.params.id);
-  res.json({ message: 'Doctor deleted successfully' });
-});
+// Standard Book Appointment Endpoint (Token Protected)
+app.post('/api/appointments/book', authenticateToken, authorizeRoles('PATIENT', 'ADMIN'), (req, res) => {
+  const { doctorId, problem, date, timeSlot, patientId } = req.body;
+  const targetPatientId = (req.user.role === 'ADMIN' && patientId) ? patientId : req.user.id;
 
-app.get('/api/appointments/available-slots', (req, res) => {
-  const { doctorId, date } = req.query;
-  const morningSlots = generate15MorningSlots();
-  const bookedSlots = appointments.filter(a => a.doctorId === doctorId && a.date === date).map(a => a.timeSlot);
+  const p = patientsDB.find(patient => patient.id === targetPatientId);
+  const doc = doctorsDB.find(d => d.id === doctorId);
 
-  res.json({ slots: morningSlots.map(slot => ({ slot, available: !bookedSlots.includes(slot) })) });
-});
+  if (!p || !doc) return res.status(400).json({ error: 'Invalid Doctor or Patient details' });
 
-app.post('/api/appointments/book', authenticateToken, (req, res) => {
-  const { doctorId, problem, date, timeSlot } = req.body;
-  const p = patients.find(patient => patient.id === req.user.id);
-  const doc = doctors.find(d => d.id === doctorId);
-
-  if (!p || !doc) return res.status(400).json({ error: 'Invalid details' });
-
-  const dayApps = appointments.filter(a => a.doctorId === doctorId && a.date === date);
-  if (dayApps.length >= 15) return res.status(400).json({ error: '15 slots daily limit reached for this doctor' });
+  const dayApps = appointmentsDB.filter(a => a.doctorId === doctorId && a.appointment_date === date && a.status !== 'CANCELLED');
+  if (dayApps.some(a => a.time_slot === timeSlot)) {
+    return res.status(400).json({ error: 'This time slot is already booked' });
+  }
 
   const newApp = {
-    id: 'APP' + Date.now(),
+    id: 'APP_' + (appointmentCounter++),
     patientId: p.id,
     patient_name: p.name,
     guardian_name: p.guardianName,
@@ -231,55 +286,118 @@ app.post('/api/appointments/book', authenticateToken, (req, res) => {
     doctor_name: doc.name,
     appointment_date: date,
     time_slot: timeSlot,
-    problem,
+    problem: problem || '',
     doctor_remark: '',
+    prescriptions: [],
+    attachments: [],
     total_fee: 0,
     deposit_amount: 0,
-    balance_amount: 0
+    balance_amount: 0,
+    status: 'PENDING',
+    createdAt: new Date().toISOString()
   };
 
-  appointments.push(newApp);
-  res.json({ message: 'Booked successfully', appointment: newApp });
+  appointmentsDB.push(newApp);
+  res.json({ message: 'Appointment booked successfully', appointment: newApp });
 });
 
-app.get('/api/patient/:id/history', authenticateToken, (req, res) => {
-  res.json(appointments.filter(a => a.patientId === req.params.id));
+// 3. Patient History Route
+app.get('/api/patient/:id/history', (req, res) => {
+  const patientId = req.params.id;
+  const history = appointmentsDB.filter(a => a.patientId === patientId);
+  res.json(history);
 });
 
-app.get('/api/doctor/:id/appointments', authenticateToken, (req, res) => {
-  res.json(appointments.filter(a => a.doctorId === req.params.id));
+// ---------------------------------------------------------
+// ADMIN & DOCTOR APPOINTMENT ROUTES
+// ---------------------------------------------------------
+
+// 4. Admin All Appointments Route
+app.get('/api/admin/all-appointments', (req, res) => {
+  res.json(appointmentsDB);
 });
 
-app.post('/api/doctor/appointment/update-details', authenticateToken, (req, res) => {
-  const { appointmentId, doctorRemark, totalFee, depositAmount } = req.body;
-  const app = appointments.find(a => a.id === appointmentId);
-  if (!app) return res.status(404).json({ error: 'Appointment not found' });
-
-  if (doctorRemark !== undefined) app.doctor_remark = doctorRemark;
-  if (totalFee !== undefined) app.total_fee = Number(totalFee);
-  if (depositAmount !== undefined) app.deposit_amount = Number(depositAmount);
-  app.balance_amount = app.total_fee - app.deposit_amount;
-
-  res.json({ message: 'Updated', appointment: app });
+// Doctor Appointments Route
+app.get('/api/doctor/:id/appointments', (req, res) => {
+  const docId = req.params.id;
+  const docApps = appointmentsDB.filter(a => a.doctorId === docId);
+  res.json(docApps.length > 0 ? docApps : appointmentsDB);
 });
 
-// Admin All Data & Search Endpoints
-app.get('/api/admin/all-patients', authenticateToken, (req, res) => {
-  const publicPatients = patients.map(({ password, ...p }) => p);
+// Doctor Update Details (Remarks, Fees, Prescriptions)
+app.post('/api/doctor/appointment/update-details', authenticateToken, authorizeRoles('DOCTOR', 'ADMIN'), upload.array('attachments'), (req, res) => {
+  const { appointmentId, doctorRemark, totalFee, depositAmount, status, prescriptions } = req.body;
+  const appItem = appointmentsDB.find(a => a.id === appointmentId);
+  if (!appItem) return res.status(404).json({ error: 'Appointment not found' });
+
+  if (doctorRemark !== undefined) appItem.doctor_remark = doctorRemark;
+  if (totalFee !== undefined) appItem.total_fee = Number(totalFee);
+  if (depositAmount !== undefined) appItem.deposit_amount = Number(depositAmount);
+  appItem.balance_amount = appItem.total_fee - appItem.deposit_amount;
+  if (status) appItem.status = status;
+
+  if (prescriptions) {
+    appItem.prescriptions = typeof prescriptions === 'string' ? JSON.parse(prescriptions) : prescriptions;
+  }
+
+  if (req.files && req.files.length > 0) {
+    const filePaths = req.files.map(f => `/uploads/${f.filename}`);
+    appItem.attachments = (appItem.attachments || []).concat(filePaths);
+  }
+
+  res.json({ message: 'Appointment updated successfully', appointment: appItem });
+});
+
+// 5. Admin All Patients Route
+app.get('/api/admin/all-patients', (req, res) => {
+  const publicPatients = patientsDB.map(({ password, ...p }) => p);
   res.json(publicPatients);
 });
 
-app.get('/api/admin/all-appointments', authenticateToken, (req, res) => {
-  res.json(appointments);
+// ---------------------------------------------------------
+// PASSWORD UPDATES & ADMIN CONTROLS
+// ---------------------------------------------------------
+
+app.post('/api/patient/update-password', authenticateToken, authorizeRoles('PATIENT'), (req, res) => {
+  const p = patientsDB.find(patient => patient.id === req.user.id);
+  if (!p) return res.status(404).json({ error: 'Patient not found' });
+  p.password = req.body.newPassword;
+  p.is_first_login = false;
+  res.json({ message: 'Password updated successfully' });
 });
 
-// Serve static React build files for production/online deployment
+app.post('/api/doctor/update-password', authenticateToken, authorizeRoles('DOCTOR'), (req, res) => {
+  const doc = doctorsDB.find(d => d.id === req.user.id);
+  if (!doc) return res.status(404).json({ error: 'Doctor not found' });
+  doc.password = req.body.newPassword;
+  doc.is_first_login = false;
+  res.json({ message: 'Doctor password updated successfully' });
+});
+
+app.post('/api/admin/update-password', authenticateToken, authorizeRoles('ADMIN'), (req, res) => {
+  adminUser.password = req.body.newPassword;
+  adminUser.is_first_login = false;
+  res.json({ message: 'Admin password updated successfully' });
+});
+
+app.delete('/api/doctor/delete/:id', authenticateToken, authorizeRoles('ADMIN'), (req, res) => {
+  doctorsDB = doctorsDB.filter(d => d.id !== req.params.id);
+  res.json({ message: 'Doctor deleted successfully' });
+});
+
+// ---------------------------------------------------------
+// STATIC SERVING & PRODUCTION FALLBACK
+// ---------------------------------------------------------
 app.use(express.static(path.join(__dirname, '../client/build')));
 
-// Express 5 compatible catch-all route
 app.use((req, res) => {
   res.sendFile(path.join(__dirname, '../client/build', 'index.html'));
 });
 
+// ---------------------------------------------------------
+// SERVER INITIALIZATION
+// ---------------------------------------------------------
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+app.listen(PORT, () => {
+  console.log(`Server is running smoothly on port ${PORT}`);
+});

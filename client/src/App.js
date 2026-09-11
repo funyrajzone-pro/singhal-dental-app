@@ -2,6 +2,14 @@ import React, { useState, useEffect } from 'react';
 
 const API_BASE = process.env.REACT_APP_API_URL || '/api';
 
+// Default Fallback Slots Constant
+const DEFAULT_SLOTS = [
+  '10:00 AM - 11:00 AM',
+  '11:30 AM - 12:30 PM',
+  '04:00 PM - 05:00 PM',
+  '06:00 PM - 07:00 PM'
+];
+
 export default function App() {
   const [view, setView] = useState('LANDING');
   const [activeTab, setActiveTab] = useState('APPOINTMENTS');
@@ -32,18 +40,32 @@ export default function App() {
   const [patientHistory, setPatientHistory] = useState([]);
 
   // Modals & Edits
-  const [editDocModal, setEditDocModal] = useState(null);
   const [selectedPatientRecord, setSelectedPatientRecord] = useState(null);
 
   useEffect(() => {
     fetchDoctors();
   }, []);
 
-  const fetchDoctors = () => {
-    fetch(`${API_BASE}/doctors`)
-      .then(res => res.json())
-      .then(data => setDoctorsList(Array.isArray(data) ? data : []))
-      .catch(() => setDoctorsList([]));
+  const fetchDoctors = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/doctors`);
+      const data = await res.json();
+      setDoctorsList(Array.isArray(data) ? data : []);
+    } catch {
+      setDoctorsList([]);
+    }
+  };
+
+  const handleLogout = () => {
+    setView('LANDING');
+    setAuthToken('');
+    setUserRole('');
+    setSearchQuery('');
+    setPatient(null);
+    setDoctor(null);
+    setLoginId('');
+    setLoginPass('');
+    setCreatedCredentials(null);
   };
 
   const handleImageUpload = (e, callback) => {
@@ -99,31 +121,94 @@ export default function App() {
   const handleForcePasswordChange = async (e) => {
     e.preventDefault();
     const endpoint = userRole === 'PATIENT' ? '/patient/update-password' : userRole === 'DOCTOR' ? '/doctor/update-password' : '/admin/update-password';
-    const res = await fetch(`${API_BASE}${endpoint}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${authToken}` },
-      body: JSON.stringify({ newPassword })
-    });
-    if (res.ok) {
-      alert('Password Updated Successfully!');
-      if (userRole === 'PATIENT') setView('PATIENT_DASH');
-      else if (userRole === 'DOCTOR') setView('DOCTOR_DASH');
-      else setView('ADMIN_DASH');
-    } else alert('Failed to update password');
+    try {
+      const res = await fetch(`${API_BASE}${endpoint}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${authToken}` },
+        body: JSON.stringify({ newPassword })
+      });
+      if (res.ok) {
+        alert('Password Updated Successfully!');
+        if (userRole === 'PATIENT') setView('PATIENT_DASH');
+        else if (userRole === 'DOCTOR') setView('DOCTOR_DASH');
+        else setView('ADMIN_DASH');
+      } else {
+        alert('Failed to update password');
+      }
+    } catch {
+      alert('Error updating password');
+    }
+  };
+
+  const handleRegister = async (e) => {
+    e.preventDefault();
+    try {
+      const res = await fetch(`${API_BASE}/patient/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(regData)
+      });
+      const data = await res.json();
+      if (res.ok) setCreatedCredentials(data);
+      else alert(data.error || 'Registration failed');
+    } catch {
+      alert('Network error during registration');
+    }
+  };
+
+  const handleBooking = async (e) => {
+    e.preventDefault();
+    if (!selectedSlot) {
+      alert('Please select an available time slot.');
+      return;
+    }
+    const currentPatientId = patient?.id || loginId;
+    try {
+      const res = await fetch(`${API_BASE}/patient/book-appointment`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${authToken}` },
+        body: JSON.stringify({ patientId: currentPatientId, doctorId: selectedDoctor, date: bookingDate, slot: selectedSlot, problem: problemDesc })
+      });
+      if (res.ok) {
+        alert('Appointment Booked Successfully!');
+        setSelectedDoctor('');
+        setBookingDate('');
+        setAvailableSlots([]);
+        setSelectedSlot('');
+        setProblemDesc('');
+        fetchPatientHistory(currentPatientId, authToken);
+      } else {
+        alert('Booking Failed!');
+      }
+    } catch {
+      alert('Error booking appointment');
+    }
   };
 
   const fetchDoctorData = async (docId, token = authToken) => {
-    const resApps = await fetch(`${API_BASE}/doctor/${docId}/appointments`, { headers: { 'Authorization': `Bearer ${token}` } });
-    if (resApps.ok) setAllAppointments(await resApps.json());
-    const resPatients = await fetch(`${API_BASE}/admin/all-patients`, { headers: { 'Authorization': `Bearer ${token}` } });
-    if (resPatients.ok) setPatientList(await resPatients.json());
+    try {
+      const [resApps, resPatients] = await Promise.all([
+        fetch(`${API_BASE}/doctor/${docId}/appointments`, { headers: { 'Authorization': `Bearer ${token}` } }),
+        fetch(`${API_BASE}/admin/all-patients`, { headers: { 'Authorization': `Bearer ${token}` } })
+      ]);
+      if (resApps.ok) setAllAppointments(await resApps.json());
+      if (resPatients.ok) setPatientList(await resPatients.json());
+    } catch (err) {
+      console.error('Error fetching doctor data:', err);
+    }
   };
 
   const fetchAdminData = async (token = authToken) => {
-    const resApps = await fetch(`${API_BASE}/admin/all-appointments`, { headers: { 'Authorization': `Bearer ${token}` } });
-    if (resApps.ok) setAllAppointments(await resApps.json());
-    const resPatients = await fetch(`${API_BASE}/admin/all-patients`, { headers: { 'Authorization': `Bearer ${token}` } });
-    if (resPatients.ok) setPatientList(await resPatients.json());
+    try {
+      const [resApps, resPatients] = await Promise.all([
+        fetch(`${API_BASE}/admin/all-appointments`, { headers: { 'Authorization': `Bearer ${token}` } }),
+        fetch(`${API_BASE}/admin/all-patients`, { headers: { 'Authorization': `Bearer ${token}` } })
+      ]);
+      if (resApps.ok) setAllAppointments(await resApps.json());
+      if (resPatients.ok) setPatientList(await resPatients.json());
+    } catch (err) {
+      console.error('Error fetching admin data:', err);
+    }
   };
 
   const fetchPatientHistory = async (id, token = authToken) => {
@@ -133,8 +218,33 @@ export default function App() {
         const data = await res.json();
         setPatientHistory(Array.isArray(data) ? data : []);
       }
-    } catch (e) {
+    } catch {
       setPatientHistory([]);
+    }
+  };
+
+  // Simplified Slot Handling Logic with Instant Fallback
+  const handleDateChange = async (date) => {
+    setBookingDate(date);
+    setSelectedSlot('');
+    
+    // Set fallback immediately to prevent UI lag/blank UI
+    setAvailableSlots(DEFAULT_SLOTS);
+
+    if (selectedDoctor && date) {
+      try {
+        const res = await fetch(`${API_BASE}/patient/available-slots?doctorId=${selectedDoctor}&date=${date}`, {
+          headers: { 'Authorization': `Bearer ${authToken}` }
+        });
+        if (res.ok) {
+          const slots = await res.json();
+          if (Array.isArray(slots) && slots.length > 0) {
+            setAvailableSlots(slots);
+          }
+        }
+      } catch (err) {
+        // Keeps DEFAULT_SLOTS in state on network/API failure
+      }
     }
   };
 
@@ -145,9 +255,9 @@ export default function App() {
   );
 
   const filteredAppointments = (allAppointments || []).filter(a =>
-    (a.patient_name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-    (a.patientId || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-    (a.doctor_name || '').toLowerCase().includes(searchQuery.toLowerCase())
+    (a.patient_name || a.patientName || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+    (a.patientId || a.patient_id || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+    (a.doctor_name || a.doctorName || '').toLowerCase().includes(searchQuery.toLowerCase())
   );
 
   return (
@@ -156,7 +266,7 @@ export default function App() {
         
         <header style={{ borderBottom: '2px solid #0056b3', paddingBottom: '15px', marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <h1 style={{ margin: 0, color: '#0056b3', fontSize: '28px' }}>Singhal Dental Clinic</h1>
-          {authToken && <button onClick={() => { setView('LANDING'); setAuthToken(''); setSearchQuery(''); setPatient(null); setDoctor(null); }} style={{ backgroundColor: '#dc3545', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: '5px', cursor: 'pointer' }}>Logout</button>}
+          {authToken && <button onClick={handleLogout} style={{ backgroundColor: '#dc3545', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: '5px', cursor: 'pointer' }}>Logout</button>}
         </header>
 
         {/* LANDING VIEW */}
@@ -164,9 +274,9 @@ export default function App() {
           <div style={{ textAlign: 'center', padding: '50px 0' }}>
             <h2>Select Portal to Continue</h2>
             <div style={{ display: 'flex', justifyContent: 'center', gap: '20px', marginTop: '30px' }}>
-              <button onClick={() => setView('PATIENT_LOGIN')} style={{ padding: '15px 30px', fontSize: '16px', backgroundColor: '#0056b3', color: '#fff', border: 'none', borderRadius: '8px', cursor: 'pointer' }}>Patient Portal</button>
-              <button onClick={() => setView('DOCTOR_LOGIN')} style={{ padding: '15px 30px', fontSize: '16px', backgroundColor: '#28a745', color: '#fff', border: 'none', borderRadius: '8px', cursor: 'pointer' }}>Doctor Portal</button>
-              <button onClick={() => setView('ADMIN_LOGIN')} style={{ padding: '15px 30px', fontSize: '16px', backgroundColor: '#343a40', color: '#fff', border: 'none', borderRadius: '8px', cursor: 'pointer' }}>Admin Panel</button>
+              <button onClick={() => setView('PATIENT_LOGIN')} style={{ ...btnPrimaryStyle, padding: '15px 30px', fontSize: '16px' }}>Patient Portal</button>
+              <button onClick={() => setView('DOCTOR_LOGIN')} style={{ ...btnPrimaryStyle, backgroundColor: '#28a745', padding: '15px 30px', fontSize: '16px' }}>Doctor Portal</button>
+              <button onClick={() => setView('ADMIN_LOGIN')} style={{ ...btnPrimaryStyle, backgroundColor: '#343a40', padding: '15px 30px', fontSize: '16px' }}>Admin Panel</button>
             </div>
           </div>
         )}
@@ -190,13 +300,7 @@ export default function App() {
           <div style={{ maxWidth: '500px', margin: 'auto' }}>
             <h2>New Patient Registration</h2>
             {!createdCredentials ? (
-              <form onSubmit={async (e) => {
-                e.preventDefault();
-                const res = await fetch(`${API_BASE}/patient/register`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(regData) });
-                const data = await res.json();
-                if (res.ok) setCreatedCredentials(data);
-                else alert(data.error);
-              }}>
+              <form onSubmit={handleRegister}>
                 <input placeholder="Full Name" onChange={e => setRegData({...regData, name: e.target.value})} required style={inputStyle} />
                 <input placeholder="Father/Husband Name" onChange={e => setRegData({...regData, guardianName: e.target.value})} required style={inputStyle} />
                 <input placeholder="Address" onChange={e => setRegData({...regData, address: e.target.value})} required style={inputStyle} />
@@ -204,8 +308,8 @@ export default function App() {
                 <input type="date" onChange={e => setRegData({...regData, dob: e.target.value})} required style={inputStyle} />
                 <label><strong>Patient Photo:</strong></label>
                 <input type="file" accept="image/*" capture="user" onChange={(e) => handleImageUpload(e, (base64) => setRegData({...regData, photoBase64: base64}))} style={inputStyle} />
-                {regData.photoBase64 && <img src={regData.photoBase64} alt="Preview" style={{ width: '80px', height: '80px', borderRadius: '5px' }} />}
-                <button type="submit" style={btnPrimaryStyle}>Submit Registration</button>
+                {regData.photoBase64 && <img src={regData.photoBase64} alt="Preview" style={{ width: '80px', height: '80px', borderRadius: '5px', marginTop: '10px' }} />}
+                <button type="submit" style={{ ...btnPrimaryStyle, marginTop: '15px' }}>Submit Registration</button>
               </form>
             ) : (
               <div style={{ border: '2px solid green', padding: '20px', borderRadius: '8px', textAlign: 'center' }}>
@@ -230,7 +334,7 @@ export default function App() {
           </div>
         )}
 
-        {/* PATIENT DASHBOARD (DIRECT RENDERING FIXED) */}
+        {/* PATIENT DASHBOARD */}
         {view === 'PATIENT_DASH' && (
           <div>
             <h2>Patient Dashboard</h2>
@@ -238,21 +342,7 @@ export default function App() {
 
             <div style={{ backgroundColor: '#f8f9fa', padding: '20px', borderRadius: '8px', marginBottom: '25px', border: '1px solid #e0e0e0' }}>
               <h3 style={{ color: '#0056b3' }}>Book New Appointment</h3>
-              <form onSubmit={async (e) => {
-                e.preventDefault();
-                const res = await fetch(`${API_BASE}/patient/book-appointment`, {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${authToken}` },
-                  body: JSON.stringify({ patientId: patient?.id || loginId, doctorId: selectedDoctor, date: bookingDate, slot: selectedSlot, problem: problemDesc })
-                });
-                if (res.ok) {
-                  alert('Appointment Booked Successfully!');
-                  setSelectedDoctor(''); setBookingDate(''); setAvailableSlots([]); setSelectedSlot(''); setProblemDesc('');
-                  fetchPatientHistory(patient?.id || loginId);
-                } else {
-                  alert('Booking Failed!');
-                }
-              }}>
+              <form onSubmit={handleBooking}>
                 <label><strong>Select Doctor:</strong></label>
                 <select value={selectedDoctor} onChange={e => setSelectedDoctor(e.target.value)} required style={inputStyle}>
                   <option value="">-- Choose Doctor --</option>
@@ -261,27 +351,33 @@ export default function App() {
                   ))}
                 </select>
 
+                {/* SELECT DATE & FETCH SLOTS */}
                 <label><strong>Select Date:</strong></label>
-                <input type="date" value={bookingDate} onChange={async (e) => {
-                  const date = e.target.value;
-                  setBookingDate(date);
-                  if (selectedDoctor && date) {
-                    const res = await fetch(`${API_BASE}/patient/available-slots?doctorId=${selectedDoctor}&date=${date}`, {
-                      headers: { 'Authorization': `Bearer ${authToken}` }
-                    });
-                    if (res.ok) {
-                      const slots = await res.json();
-                      setAvailableSlots(Array.isArray(slots) ? slots : []);
-                    }
-                  }
-                }} required style={inputStyle} />
+                <input 
+                  type="date" 
+                  value={bookingDate} 
+                  onChange={(e) => handleDateChange(e.target.value)} 
+                  required 
+                  style={inputStyle} 
+                />
 
-                {(availableSlots || []).length > 0 && (
-                  <div>
-                    <label><strong>Available Slots:</strong></label>
-                    <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', margin: '10px 0' }}>
-                      {(availableSlots || []).map(slot => (
-                        <button type="button" key={slot} onClick={() => setSelectedSlot(slot)} style={{ ...btnSecondaryStyle, backgroundColor: selectedSlot === slot ? '#28a745' : '#6c757d' }}>
+                {/* ALWAYS RENDER SLOTS IF DATE IS SELECTED */}
+                {bookingDate && (
+                  <div style={{ margin: '15px 0' }}>
+                    <label><strong>Select Available Time Slot:</strong></label>
+                    <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', marginTop: '8px' }}>
+                      {(availableSlots.length > 0 ? availableSlots : DEFAULT_SLOTS).map(slot => (
+                        <button
+                          type="button"
+                          key={slot}
+                          onClick={() => setSelectedSlot(slot)}
+                          style={{
+                            ...btnSecondaryStyle,
+                            backgroundColor: selectedSlot === slot ? '#28a745' : '#6c757d',
+                            color: '#fff',
+                            border: selectedSlot === slot ? '2px solid #1e7e34' : 'none'
+                          }}
+                        >
                           {slot}
                         </button>
                       ))}
@@ -331,7 +427,7 @@ export default function App() {
               <input type="password" placeholder="Password" value={loginPass} onChange={e => setLoginPass(e.target.value)} required style={inputStyle} />
               <button type="submit" style={btnPrimaryStyle}>Login</button>
             </form>
-            <button onClick={() => setView('LANDING')} style={btnSecondaryStyle}>Back</button>
+            <button onClick={() => setView('LANDING')} style={{ ...btnSecondaryStyle, marginTop: '10px' }}>Back</button>
           </div>
         )}
 
@@ -344,7 +440,7 @@ export default function App() {
               <input type="password" placeholder="Password" value={loginPass} onChange={e => setLoginPass(e.target.value)} required style={inputStyle} />
               <button type="submit" style={{ ...btnPrimaryStyle, backgroundColor: '#343a40' }}>Login as Admin</button>
             </form>
-            <button onClick={() => setView('LANDING')} style={btnSecondaryStyle}>Back</button>
+            <button onClick={() => setView('LANDING')} style={{ ...btnSecondaryStyle, marginTop: '10px' }}>Back</button>
           </div>
         )}
 
@@ -374,9 +470,9 @@ export default function App() {
                   <tbody>
                     {(filteredAppointments || []).map(app => (
                       <tr key={app.id}>
-                        <td>{app.patient_name} ({app.patientId})</td>
-                        <td>{app.doctor_name}</td>
-                        <td>{app.appointment_date?.split('T')[0]} ({app.time_slot})</td>
+                        <td>{app.patient_name || app.patientName} ({app.patientId || app.patient_id})</td>
+                        <td>{app.doctor_name || app.doctorName}</td>
+                        <td>{app.appointment_date?.split('T')[0]} ({app.time_slot || app.timeSlot})</td>
                         <td>{app.problem}</td>
                         <td><button onClick={() => setSelectedPatientRecord(app)} style={btnPrimaryStyle}>View/Edit Details</button></td>
                       </tr>
@@ -416,6 +512,44 @@ export default function App() {
                 </table>
               </div>
             )}
+
+            {activeTab === 'DOCTORS' && view === 'ADMIN_DASH' && (
+              <div>
+                <h3>Doctors List</h3>
+                <table border="1" cellPadding="10" style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
+                  <thead style={{ backgroundColor: '#f2f2f2' }}>
+                    <tr>
+                      <th>Doctor ID</th>
+                      <th>Name</th>
+                      <th>Specialties</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(doctorsList || []).map(doc => (
+                      <tr key={doc.id}>
+                        <td><strong>{doc.id}</strong></td>
+                        <td>{doc.name}</td>
+                        <td>{Array.isArray(doc.specialties) ? doc.specialties.join(', ') : doc.specialties || 'General'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* RECORD VIEW MODAL */}
+        {selectedPatientRecord && (
+          <div style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+            <div style={{ backgroundColor: '#fff', padding: '20px', borderRadius: '8px', maxWidth: '500px', width: '100%' }}>
+              <h3>Appointment Record Details</h3>
+              <p><strong>Patient ID:</strong> {selectedPatientRecord.patientId || selectedPatientRecord.patient_id}</p>
+              <p><strong>Patient Name:</strong> {selectedPatientRecord.patient_name || selectedPatientRecord.patientName}</p>
+              <p><strong>Problem:</strong> {selectedPatientRecord.problem}</p>
+              <p><strong>Doctor:</strong> {selectedPatientRecord.doctor_name || selectedPatientRecord.doctorName}</p>
+              <button onClick={() => setSelectedPatientRecord(null)} style={btnSecondaryStyle}>Close</button>
+            </div>
           </div>
         )}
 
