@@ -7,7 +7,6 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('APPOINTMENTS');
   const [userRole, setUserRole] = useState('');
   const [patient, setPatient] = useState(null);
-  const [authToken, setAuthToken] = useState('');
 
   // Form & Selection States
   const [loginId, setLoginId] = useState('');
@@ -18,8 +17,8 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState('');
 
   // Booking States
-  const [selectedDoctor, setSelectedDoctor] = useState('');
-  const [bookingDate, setBookingDate] = useState('');
+  const [selectedDoctor, setSelectedDoctor] = useState('DOC101');
+  const [bookingDate, setBookingDate] = useState('2026-09-12');
   const [selectedSlot, setSelectedSlot] = useState('10:00 AM - 11:00 AM');
   const [problemDesc, setProblemDesc] = useState('');
   const [patientHistory, setPatientHistory] = useState([]);
@@ -31,7 +30,15 @@ export default function App() {
     '05:30 PM - 06:30 PM'
   ];
 
+  const defaultDoctors = [
+    { id: 'DOC101', name: 'Dr. Himanshu Singhal', specialty: 'Orthodontics & Implantology', mobile: '9876543210' },
+    { id: 'DOC102', name: 'Dr. Neha Sharma', specialty: 'Endodontist (Root Canal Specialist)', mobile: '9876543211' }
+  ];
+
   useEffect(() => {
+    // Sync cached appointments on startup
+    const localApps = JSON.parse(localStorage.getItem('appointments_db') || '[]');
+    setAllAppointments(localApps);
     fetchDoctors();
   }, []);
 
@@ -40,59 +47,40 @@ export default function App() {
       const res = await fetch(`${API_BASE}/doctors`);
       if (res.ok) {
         const data = await res.json();
-        setDoctorsList(Array.isArray(data) && data.length > 0 ? data : [
-          { id: 'DOC101', name: 'Dr. Himanshu Singhal (MDS - Orthodontics)' }
-        ]);
-      } else throw new Error();
+        setDoctorsList(Array.isArray(data) && data.length > 0 ? data : defaultDoctors);
+      } else {
+        setDoctorsList(defaultDoctors);
+      }
     } catch {
-      setDoctorsList([{ id: 'DOC101', name: 'Dr. Himanshu Singhal (MDS - Orthodontics)' }]);
+      setDoctorsList(defaultDoctors);
+    }
+  };
+
+  const syncData = () => {
+    const localApps = JSON.parse(localStorage.getItem('appointments_db') || '[]');
+    setAllAppointments(localApps);
+    if (patient) {
+      setPatientHistory(localApps.filter(a => a.patientId === patient.id || a.patientId === loginId));
     }
   };
 
   const handleLogin = async (e, role) => {
     e.preventDefault();
     setUserRole(role);
-    setAuthToken('token_' + Date.now());
 
     if (role === 'PATIENT') {
-      const currentPatient = { id: loginId || 'SDC1001', name: loginId || 'SDC1001' };
-      setPatient(currentPatient);
+      const pObj = { id: loginId || 'SDC1001', name: loginId || 'SDC1001' };
+      setPatient(pObj);
       setView('PATIENT_DASH');
-      fetchPatientHistory(currentPatient.id);
+      const localApps = JSON.parse(localStorage.getItem('appointments_db') || '[]');
+      setPatientHistory(localApps.filter(a => a.patientId === pObj.id));
     } else if (role === 'DOCTOR') {
       setView('DOCTOR_DASH');
-      fetchAllAppointments();
+      syncData();
     } else if (role === 'ADMIN') {
       setView('ADMIN_DASH');
-      fetchAllAppointments();
+      syncData();
       fetchPatientsList();
-    }
-  };
-
-  const fetchPatientHistory = async (pId) => {
-    try {
-      const res = await fetch(`${API_BASE}/patient/${pId}/history`);
-      if (res.ok) {
-        const data = await res.json();
-        setPatientHistory(Array.isArray(data) ? data : []);
-      }
-    } catch {
-      // Local Sync Fallback
-      const localData = JSON.parse(localStorage.getItem('appointments_db') || '[]');
-      setPatientHistory(localData.filter(item => item.patientId === pId || item.patient_id === pId));
-    }
-  };
-
-  const fetchAllAppointments = async () => {
-    try {
-      const res = await fetch(`${API_BASE}/admin/all-appointments`);
-      if (res.ok) {
-        const data = await res.json();
-        setAllAppointments(Array.isArray(data) ? data : []);
-      } else throw new Error();
-    } catch {
-      const localData = JSON.parse(localStorage.getItem('appointments_db') || '[]');
-      setAllAppointments(localData);
     }
   };
 
@@ -104,33 +92,37 @@ export default function App() {
         setPatientList(Array.isArray(data) ? data : []);
       }
     } catch {
-      setPatientList([{ id: 'SDC1001', name: 'SDC1001 Patient', mobile: '9876543210', guardianName: 'Guardian', address: 'Jhansi' }]);
+      setPatientList([
+        { id: 'SDC1001', name: 'v', guardianName: 'm', mobile: '7676786867', address: 'j' },
+        { id: 'SDC1002', name: 'a', guardianName: 'm', mobile: '55675765765', address: 'h' }
+      ]);
     }
   };
 
   const handleBookAppointment = async (e) => {
     e.preventDefault();
-    const docObj = doctorsList.find(d => d.id === selectedDoctor) || doctorsList[0];
-    
+
+    const docObj = doctorsList.find(d => d.id === selectedDoctor) || doctorsList[0] || defaultDoctors[0];
+
     const newAppointment = {
       id: 'APP_' + Date.now(),
       patientId: patient?.id || loginId || 'SDC1001',
       patient_name: patient?.name || loginId || 'SDC1001',
-      doctorId: selectedDoctor || docObj?.id || 'DOC101',
-      doctor_name: docObj?.name || 'Dr. Himanshu Singhal',
-      appointment_date: bookingDate || new Date().toISOString().split('T')[0],
+      doctorId: selectedDoctor || docObj.id,
+      doctor_name: docObj.name,
+      appointment_date: bookingDate,
       time_slot: selectedSlot,
       problem: problemDesc,
-      doctor_remark: 'Pending Consultation',
-      total_fee: 500,
-      deposit_amount: 0
+      doctor_remark: 'Pending Diagnosis',
+      total_fee: 500
     };
 
-    // Save locally to guarantee sync across views
+    // Store in Persistent Storage
     const existingApps = JSON.parse(localStorage.getItem('appointments_db') || '[]');
     const updatedApps = [newAppointment, ...existingApps];
     localStorage.setItem('appointments_db', JSON.stringify(updatedApps));
 
+    // Try Sync with Backend
     try {
       await fetch(`${API_BASE}/patient/book-appointment`, {
         method: 'POST',
@@ -138,15 +130,13 @@ export default function App() {
         body: JSON.stringify(newAppointment)
       });
     } catch (err) {
-      console.log('Backend sync skipped, saved to local cache');
+      console.log('Backend sync offline, saved to local state');
     }
 
     alert('Appointment Booked Successfully!');
     setProblemDesc('');
-    setBookingDate('');
-    
-    // Refresh history
-    setPatientHistory(updatedApps.filter(item => item.patientId === newAppointment.patientId));
+    setPatientHistory(updatedApps.filter(a => a.patientId === newAppointment.patientId));
+    setAllAppointments(updatedApps);
   };
 
   const filteredAppointments = (allAppointments || []).filter(a =>
@@ -162,7 +152,7 @@ export default function App() {
         <header style={{ borderBottom: '2px solid #0056b3', paddingBottom: '15px', marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <h1 style={{ margin: 0, color: '#0056b3', fontSize: '28px' }}>Singhal Dental Clinic</h1>
           {view !== 'LANDING' && (
-            <button onClick={() => { setView('LANDING'); setAuthToken(''); }} style={{ backgroundColor: '#dc3545', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: '5px', cursor: 'pointer' }}>Logout</button>
+            <button onClick={() => { setView('LANDING'); setSearchQuery(''); }} style={{ backgroundColor: '#dc3545', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: '5px', cursor: 'pointer' }}>Logout</button>
           )}
         </header>
 
@@ -225,7 +215,6 @@ export default function App() {
               <form onSubmit={handleBookAppointment}>
                 <label><strong>Select Doctor:</strong></label>
                 <select value={selectedDoctor} onChange={e => setSelectedDoctor(e.target.value)} required style={inputStyle}>
-                  <option value="">-- Choose Doctor --</option>
                   {doctorsList.map(doc => (
                     <option key={doc.id} value={doc.id}>{doc.name}</option>
                   ))}
@@ -240,20 +229,20 @@ export default function App() {
                   style={inputStyle} 
                 />
 
-                {/* ALWAYS VISIBLE SLOTS */}
+                {/* SLOTS OPTION - PERMANENTLY VISIBLE */}
                 <div style={{ margin: '15px 0' }}>
-                  <label><strong>Select Available Slot:</strong></label>
-                  <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', marginTop: '8px' }}>
+                  <label style={{ display: 'block', marginBottom: '8px' }}><strong>Select Time Slot:</strong></label>
+                  <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
                     {defaultSlots.map(slot => (
                       <button
                         type="button"
                         key={slot}
                         onClick={() => setSelectedSlot(slot)}
                         style={{
-                          padding: '8px 12px',
+                          padding: '8px 14px',
                           borderRadius: '5px',
-                          border: selectedSlot === slot ? '2px solid #1e7e34' : '1px solid #ccc',
-                          backgroundColor: selectedSlot === slot ? '#28a745' : '#e9ecef',
+                          border: selectedSlot === slot ? '2px solid #0056b3' : '1px solid #ccc',
+                          backgroundColor: selectedSlot === slot ? '#0056b3' : '#fff',
                           color: selectedSlot === slot ? '#fff' : '#333',
                           cursor: 'pointer',
                           fontWeight: 'bold'
@@ -301,7 +290,7 @@ export default function App() {
                     </tr>
                   ))
                 ) : (
-                  <tr><td colSpan="5" style={{ textAlign: 'center' }}>No appointments booked yet.</td></tr>
+                  <tr><td colSpan="5" style={{ textAlign: 'center', padding: '15px' }}>No appointments booked yet.</td></tr>
                 )}
               </tbody>
             </table>
@@ -313,12 +302,16 @@ export default function App() {
           <div>
             <div style={{ display: 'flex', gap: '10px', borderBottom: '2px solid #ccc', paddingBottom: '10px', marginBottom: '20px' }}>
               <button onClick={() => setActiveTab('APPOINTMENTS')} style={{ ...tabBtnStyle, backgroundColor: activeTab === 'APPOINTMENTS' ? '#0056b3' : '#e9ecef', color: activeTab === 'APPOINTMENTS' ? '#fff' : '#333' }}>Appointment List</button>
-              {view === 'ADMIN_DASH' && <button onClick={() => setActiveTab('PATIENTS')} style={{ ...tabBtnStyle, backgroundColor: activeTab === 'PATIENTS' ? '#0056b3' : '#e9ecef', color: activeTab === 'PATIENTS' ? '#fff' : '#333' }}>Patient List</button>}
+              <button onClick={() => setActiveTab('PATIENTS')} style={{ ...tabBtnStyle, backgroundColor: activeTab === 'PATIENTS' ? '#0056b3' : '#e9ecef', color: activeTab === 'PATIENTS' ? '#fff' : '#333' }}>Patient List & Search</button>
+              {view === 'ADMIN_DASH' && (
+                <button onClick={() => setActiveTab('DOCTORS')} style={{ ...tabBtnStyle, backgroundColor: activeTab === 'DOCTORS' ? '#0056b3' : '#e9ecef', color: activeTab === 'DOCTORS' ? '#fff' : '#333' }}>Doctors List</button>
+              )}
             </div>
 
+            {/* TAB 1: APPOINTMENTS */}
             {activeTab === 'APPOINTMENTS' && (
               <div>
-                <h3>Appointments List ({view === 'DOCTOR_DASH' ? 'Doctor View' : 'Admin View'})</h3>
+                <h3>Appointments List ({view === 'DOCTOR_DASH' ? 'Doctor Portal' : 'Admin Portal'})</h3>
                 <input placeholder="Search by Patient Name or ID..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} style={{ ...inputStyle, width: '100%', marginBottom: '15px' }} />
                 <table border="1" cellPadding="10" style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
                   <thead style={{ backgroundColor: '#f2f2f2' }}>
@@ -342,13 +335,14 @@ export default function App() {
                         </tr>
                       ))
                     ) : (
-                      <tr><td colSpan="5" style={{ textAlign: 'center' }}>No records found.</td></tr>
+                      <tr><td colSpan="5" style={{ textAlign: 'center', padding: '15px' }}>No appointment records found.</td></tr>
                     )}
                   </tbody>
                 </table>
               </div>
             )}
 
+            {/* TAB 2: PATIENTS */}
             {activeTab === 'PATIENTS' && (
               <div>
                 <h3>Registered Patients</h3>
@@ -357,7 +351,7 @@ export default function App() {
                     <tr>
                       <th>Patient ID</th>
                       <th>Name</th>
-                      <th>Guardian</th>
+                      <th>Guardian Name</th>
                       <th>Mobile</th>
                       <th>Address</th>
                     </tr>
@@ -370,6 +364,33 @@ export default function App() {
                         <td>{p.guardianName}</td>
                         <td>{p.mobile}</td>
                         <td>{p.address}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {/* TAB 3: DOCTORS (ADMIN ONLY) */}
+            {activeTab === 'DOCTORS' && view === 'ADMIN_DASH' && (
+              <div>
+                <h3>Doctors List</h3>
+                <table border="1" cellPadding="10" style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
+                  <thead style={{ backgroundColor: '#f2f2f2' }}>
+                    <tr>
+                      <th>Doctor ID</th>
+                      <th>Doctor Name</th>
+                      <th>Specialty</th>
+                      <th>Contact Mobile</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(doctorsList.length > 0 ? doctorsList : defaultDoctors).map(doc => (
+                      <tr key={doc.id}>
+                        <td><strong>{doc.id}</strong></td>
+                        <td>{doc.name}</td>
+                        <td>{doc.specialty || 'General Dentistry'}</td>
+                        <td>{doc.mobile || '9876543210'}</td>
                       </tr>
                     ))}
                   </tbody>
