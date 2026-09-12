@@ -381,9 +381,9 @@ app.delete('/api/doctor/delete/:id', authenticateToken, authorizeRoles('ADMIN'),
 const clientBuildPath = path.join(__dirname, '../client/build');
 if (fs.existsSync(clientBuildPath)) {
   app.use(express.static(clientBuildPath));
-  app.get('*', (req, res) => {
-    res.sendFile(path.join(clientBuildPath, 'index.html'));
-  });
+  app.get('/*', (req, res) => {
+  res.sendFile(path.join(__dirname, '../client/build', 'index.html'));
+});
 } else {
   app.get('/', (req, res) => {
     res.send('Backend Server is running successfully!');
