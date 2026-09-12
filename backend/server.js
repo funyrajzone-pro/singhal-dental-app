@@ -141,7 +141,6 @@ const authorizeRoles = (...roles) => {
 // PUBLIC ROUTES & DOCTORS LIST
 // ---------------------------------------------------------
 
-// Doctors List Route
 app.get('/api/doctors', (req, res) => {
   const publicDocList = doctorsDB.map(({ password, ...doc }) => doc);
   res.json(publicDocList);
@@ -218,11 +217,9 @@ app.post('/api/admin/login', (req, res) => {
 // PATIENT APPOINTMENT ROUTES
 // ---------------------------------------------------------
 
-// 1. Available Slots Route
 app.get('/api/patient/available-slots', (req, res) => {
   const { doctorId, date } = req.query;
 
-  // Filter already booked slots for this doctor on this date
   const bookedSlots = appointmentsDB
     .filter(a => a.doctorId === doctorId && a.appointment_date === date && a.status !== 'CANCELLED')
     .map(a => a.time_slot);
@@ -231,7 +228,6 @@ app.get('/api/patient/available-slots', (req, res) => {
   res.json(available);
 });
 
-// 2. Book Appointment Route
 app.post('/api/patient/book-appointment', (req, res) => {
   const { patientId, doctorId, date, slot, problem } = req.body;
 
@@ -239,19 +235,19 @@ app.post('/api/patient/book-appointment', (req, res) => {
   const patient = patientsDB.find(p => p.id === patientId);
 
   const newAppointment = {
-    id: 'APP_' + Date.now(),
+    id: req.body.id || ('APP_' + Date.now()),
     patientId: patientId || 'SDC1001',
-    patient_name: req.body.patientName || (patient ? patient.name : 'Patient ' + patientId),
-    doctorId: doctorId,
-    doctor_name: doc ? doc.name : 'Dr. Himanshu Singhal',
-    appointment_date: date,
-    time_slot: slot || '10:00 AM - 11:00 AM',
-    problem: problem || '',
-    doctor_remark: '',
-    total_fee: 0,
+    patient_name: req.body.patient_name || req.body.patientName || (patient ? patient.name : 'Patient ' + patientId),
+    doctorId: doctorId || 'DOC101',
+    doctor_name: req.body.doctor_name || (doc ? doc.name : 'Dr. Himanshu Singhal'),
+    appointment_date: date || req.body.appointment_date,
+    time_slot: slot || req.body.time_slot || '10:00 AM - 11:00 AM',
+    problem: problem || req.body.problem || '',
+    doctor_remark: req.body.doctor_remark || 'Pending',
+    total_fee: req.body.total_fee || 500,
     deposit_amount: 0,
-    balance_amount: 0,
-    status: 'PENDING',
+    balance_amount: req.body.total_fee || 500,
+    status: 'CONFIRMED',
     createdAt: new Date().toISOString()
   };
 
@@ -259,7 +255,6 @@ app.post('/api/patient/book-appointment', (req, res) => {
   res.status(200).json({ success: true, message: 'Appointment booked successfully', appointment: newAppointment });
 });
 
-// Standard Book Appointment Endpoint (Token Protected)
 app.post('/api/appointments/book', authenticateToken, authorizeRoles('PATIENT', 'ADMIN'), (req, res) => {
   const { doctorId, problem, date, timeSlot, patientId } = req.body;
   const targetPatientId = (req.user.role === 'ADMIN' && patientId) ? patientId : req.user.id;
@@ -290,10 +285,10 @@ app.post('/api/appointments/book', authenticateToken, authorizeRoles('PATIENT', 
     doctor_remark: '',
     prescriptions: [],
     attachments: [],
-    total_fee: 0,
+    total_fee: 500,
     deposit_amount: 0,
-    balance_amount: 0,
-    status: 'PENDING',
+    balance_amount: 500,
+    status: 'CONFIRMED',
     createdAt: new Date().toISOString()
   };
 
@@ -301,7 +296,6 @@ app.post('/api/appointments/book', authenticateToken, authorizeRoles('PATIENT', 
   res.json({ message: 'Appointment booked successfully', appointment: newApp });
 });
 
-// 3. Patient History Route
 app.get('/api/patient/:id/history', (req, res) => {
   const patientId = req.params.id;
   const history = appointmentsDB.filter(a => a.patientId === patientId);
@@ -312,19 +306,16 @@ app.get('/api/patient/:id/history', (req, res) => {
 // ADMIN & DOCTOR APPOINTMENT ROUTES
 // ---------------------------------------------------------
 
-// 4. Admin All Appointments Route
 app.get('/api/admin/all-appointments', (req, res) => {
   res.json(appointmentsDB);
 });
 
-// Doctor Appointments Route
 app.get('/api/doctor/:id/appointments', (req, res) => {
   const docId = req.params.id;
   const docApps = appointmentsDB.filter(a => a.doctorId === docId);
   res.json(docApps.length > 0 ? docApps : appointmentsDB);
 });
 
-// Doctor Update Details (Remarks, Fees, Prescriptions)
 app.post('/api/doctor/appointment/update-details', authenticateToken, authorizeRoles('DOCTOR', 'ADMIN'), upload.array('attachments'), (req, res) => {
   const { appointmentId, doctorRemark, totalFee, depositAmount, status, prescriptions } = req.body;
   const appItem = appointmentsDB.find(a => a.id === appointmentId);
@@ -348,7 +339,6 @@ app.post('/api/doctor/appointment/update-details', authenticateToken, authorizeR
   res.json({ message: 'Appointment updated successfully', appointment: appItem });
 });
 
-// 5. Admin All Patients Route
 app.get('/api/admin/all-patients', (req, res) => {
   const publicPatients = patientsDB.map(({ password, ...p }) => p);
   res.json(publicPatients);
@@ -386,18 +376,24 @@ app.delete('/api/doctor/delete/:id', authenticateToken, authorizeRoles('ADMIN'),
 });
 
 // ---------------------------------------------------------
-// STATIC SERVING & PRODUCTION FALLBACK
+// STATIC SERVING & PRODUCTION FALLBACK (FIXED FOR RENDER)
 // ---------------------------------------------------------
-app.use(express.static(path.join(__dirname, '../client/build')));
-
-app.use((req, res) => {
-  res.sendFile(path.join(__dirname, '../client/build', 'index.html'));
-});
+const clientBuildPath = path.join(__dirname, '../client/build');
+if (fs.existsSync(clientBuildPath)) {
+  app.use(express.static(clientBuildPath));
+  app.get('*', (req, res) => {
+    res.sendFile(path.join(clientBuildPath, 'index.html'));
+  });
+} else {
+  app.get('/', (req, res) => {
+    res.send('Backend Server is running successfully!');
+  });
+}
 
 // ---------------------------------------------------------
-// SERVER INITIALIZATION
+// SERVER INITIALIZATION (RENDER PORT BINDING FIX)
 // ---------------------------------------------------------
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
+app.listen(PORT, '0.0.0.0', () => {
   console.log(`Server is running smoothly on port ${PORT}`);
 });
