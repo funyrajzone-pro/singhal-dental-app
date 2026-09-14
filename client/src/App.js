@@ -5,9 +5,13 @@ const API_BASE = process.env.REACT_APP_API_URL || '/api';
 export default function App() {
   const [view, setView] = useState('LANDING');
   const [activeTab, setActiveTab] = useState('APPOINTMENTS');
-  const [userRole, setUserRole] = useState('');
+  const [userRole, setUserRole] = useState(localStorage.getItem('user_role') || '');
   const [token, setToken] = useState(localStorage.getItem('jwt_token') || '');
-  const [patient, setPatient] = useState(null);
+  const [patient, setPatient] = useState(() => {
+    const saved = localStorage.getItem('patient_data');
+    return saved ? JSON.parse(saved) : null;
+  });
+  const [currentDoctorId, setCurrentDoctorId] = useState(localStorage.getItem('doctor_id') || '');
 
   // Form & Authentication States
   const [loginId, setLoginId] = useState('');
@@ -42,8 +46,18 @@ export default function App() {
 
   useEffect(() => {
     fetchDoctors();
-    const localApps = JSON.parse(localStorage.getItem('appointments_db') || '[]');
-    setAllAppointments(localApps);
+    if (token) {
+      if (userRole === 'PATIENT' && patient?.id) {
+        setView('PATIENT_DASH');
+        fetchPatientHistory(patient.id);
+      } else if (userRole === 'DOCTOR') {
+        setView('DOCTOR_DASH');
+        fetchDoctorAppointments(currentDoctorId);
+      } else if (userRole === 'ADMIN') {
+        setView('ADMIN_DASH');
+        fetchAdminData();
+      }
+    }
   }, []);
 
   // ---------------------------------------------------------
@@ -81,6 +95,23 @@ export default function App() {
     setPatientHistory(localApps.filter(a => a.patientId === patientId));
   };
 
+  const fetchDoctorAppointments = async (docId) => {
+    try {
+      const res = await fetch(`${API_BASE}/doctor/${docId}/appointments`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setAllAppointments(data);
+        return;
+      }
+    } catch (err) {
+      console.log('Using local storage fallback for doctor appointments');
+    }
+    const localApps = JSON.parse(localStorage.getItem('appointments_db') || '[]');
+    setAllAppointments(docId ? localApps.filter(a => a.doctorId === docId) : localApps);
+  };
+
   const fetchAdminData = async () => {
     try {
       const appRes = await fetch(`${API_BASE}/admin/all-appointments`, {
@@ -104,6 +135,8 @@ export default function App() {
   const handleLogin = async (e, role) => {
     e.preventDefault();
     setUserRole(role);
+    localStorage.setItem('user_role', role);
+
     const endpoint = role === 'PATIENT' ? '/patient/login' : role === 'DOCTOR' ? '/doctor/login' : '/admin/login';
     const payload = role === 'PATIENT' ? { patientId: loginId, password: loginPass } : { id: loginId, password: loginPass };
 
@@ -123,26 +156,35 @@ export default function App() {
       }
 
       if (role === 'PATIENT') {
-        setPatient(data.patient || { id: loginId, name: loginId });
+        const pData = data.patient || { id: loginId, name: loginId };
+        setPatient(pData);
+        localStorage.setItem('patient_data', JSON.stringify(pData));
         setView('PATIENT_DASH');
-        fetchPatientHistory(loginId);
+        fetchPatientHistory(pData.id);
       } else if (role === 'DOCTOR') {
+        setCurrentDoctorId(loginId);
+        localStorage.setItem('doctor_id', loginId);
         setView('DOCTOR_DASH');
-        fetchAdminData();
+        fetchDoctorAppointments(loginId);
       } else if (role === 'ADMIN') {
         setView('ADMIN_DASH');
         fetchAdminData();
       }
     } catch (err) {
-      alert(err.message + ' - Entering Demo/Local Mode');
-      // Fallback for offline/demo operation
+      alert(err.message + ' - Entering Offline/Fallback Mode');
       if (role === 'PATIENT') {
         const demoPatient = { id: loginId || 'SDC1001', name: loginId || 'Patient User' };
         setPatient(demoPatient);
+        localStorage.setItem('patient_data', JSON.stringify(demoPatient));
         setView('PATIENT_DASH');
         fetchPatientHistory(demoPatient.id);
+      } else if (role === 'DOCTOR') {
+        setCurrentDoctorId(loginId || 'DOC101');
+        localStorage.setItem('doctor_id', loginId || 'DOC101');
+        setView('DOCTOR_DASH');
+        fetchDoctorAppointments(loginId || 'DOC101');
       } else {
-        setView(role === 'DOCTOR' ? 'DOCTOR_DASH' : 'ADMIN_DASH');
+        setView('ADMIN_DASH');
         fetchAdminData();
       }
     }
@@ -172,8 +214,13 @@ export default function App() {
 
   const handleLogout = () => {
     localStorage.removeItem('jwt_token');
+    localStorage.removeItem('user_role');
+    localStorage.removeItem('patient_data');
+    localStorage.removeItem('doctor_id');
     setToken('');
+    setUserRole('');
     setPatient(null);
+    setCurrentDoctorId('');
     setLoginId('');
     setLoginPass('');
     setView('LANDING');
@@ -196,16 +243,12 @@ export default function App() {
       time_slot: selectedSlot,
       problem: problemDesc,
       doctor_remark: 'Pending Diagnosis',
-      total_fee: 500
+      total_fee: 500,
+      status: 'CONFIRMED'
     };
 
-    // Save to LocalStorage Fallback
-    const existingApps = JSON.parse(localStorage.getItem('appointments_db') || '[]');
-    const updatedApps = [newAppointment, ...existingApps];
-    localStorage.setItem('appointments_db', JSON.stringify(updatedApps));
-
     try {
-      await fetch(`${API_BASE}/patient/book-appointment`, {
+      const res = await fetch(`${API_BASE}/patient/book-appointment`, {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
@@ -213,13 +256,30 @@ export default function App() {
         },
         body: JSON.stringify(newAppointment)
       });
+
+      if (res.ok) {
+        const data = await res.json();
+        const createdApp = data.appointment || newAppointment;
+        const existingApps = JSON.parse(localStorage.getItem('appointments_db') || '[]');
+        const updatedApps = [createdApp, ...existingApps];
+        localStorage.setItem('appointments_db', JSON.stringify(updatedApps));
+
+        alert('Appointment Booked Successfully!');
+        setProblemDesc('');
+        setPatientHistory(updatedApps.filter(a => a.patientId === createdApp.patientId));
+        return;
+      }
     } catch {
       console.log('Server unreachable. Saved to local state.');
     }
 
+    // Fallback if fetch fails
+    const existingApps = JSON.parse(localStorage.getItem('appointments_db') || '[]');
+    const updatedApps = [newAppointment, ...existingApps];
+    localStorage.setItem('appointments_db', JSON.stringify(updatedApps));
+
     alert('Appointment Booked Successfully!');
     setProblemDesc('');
-    setAllAppointments(updatedApps);
     setPatientHistory(updatedApps.filter(a => a.patientId === newAppointment.patientId));
   };
 
@@ -236,7 +296,7 @@ export default function App() {
         <header style={{ borderBottom: '2px solid #0056b3', paddingBottom: '15px', marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div>
             <h1 style={{ margin: 0, color: '#0056b3', fontSize: '28px' }}>Singhal Dental Clinic</h1>
-            <small style={{ color: '#66c' }}>Jhansi, U.P.</small>
+            <small style={{ color: '#666' }}>Jhansi, U.P.</small>
           </div>
           {view !== 'LANDING' && (
             <button onClick={handleLogout} style={{ backgroundColor: '#dc3545', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: '5px', cursor: 'pointer' }}>Logout</button>
@@ -416,7 +476,7 @@ export default function App() {
             {/* TAB 1: APPOINTMENTS */}
             {activeTab === 'APPOINTMENTS' && (
               <div>
-                <h3>Appointments List ({view === 'DOCTOR_DASH' ? 'Doctor Portal' : 'Admin Portal'})</h3>
+                <h3>Appointments List ({view === 'DOCTOR_DASH' ? `Doctor Portal (${currentDoctorId})` : 'Admin Portal'})</h3>
                 <input placeholder="Search by Patient Name or ID..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} style={{ ...inputStyle, width: '100%', marginBottom: '15px' }} />
                 <table border="1" cellPadding="10" style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
                   <thead style={{ backgroundColor: '#f2f2f2' }}>

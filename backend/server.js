@@ -130,7 +130,7 @@ const authenticateToken = (req, res, next) => {
 
 const authorizeRoles = (...roles) => {
   return (req, res, next) => {
-    if (!roles.includes(req.user.role)) {
+    if (!req.user || !roles.includes(req.user.role)) {
       return res.status(403).json({ error: 'Access denied: Unauthorized role' });
     }
     next();
@@ -235,15 +235,21 @@ app.post('/api/patient/book-appointment', (req, res) => {
   const patient = patientsDB.find(p => p.id === patientId);
 
   const newAppointment = {
-    id: req.body.id || ('APP_' + Date.now()),
+    id: req.body.id || ('APP_' + (appointmentCounter++)),
     patientId: patientId || 'SDC1001',
     patient_name: req.body.patient_name || req.body.patientName || (patient ? patient.name : 'Patient ' + patientId),
+    guardian_name: patient ? patient.guardianName : '',
+    address: patient ? patient.address : '',
+    mobile: patient ? patient.mobile : '',
+    dob: patient ? patient.dob : '',
     doctorId: doctorId || 'DOC101',
     doctor_name: req.body.doctor_name || (doc ? doc.name : 'Dr. Himanshu Singhal'),
     appointment_date: date || req.body.appointment_date,
     time_slot: slot || req.body.time_slot || '10:00 AM - 11:00 AM',
     problem: problem || req.body.problem || '',
     doctor_remark: req.body.doctor_remark || 'Pending',
+    prescriptions: [],
+    attachments: [],
     total_fee: req.body.total_fee || 500,
     deposit_amount: 0,
     balance_amount: req.body.total_fee || 500,
@@ -282,7 +288,7 @@ app.post('/api/appointments/book', authenticateToken, authorizeRoles('PATIENT', 
     appointment_date: date,
     time_slot: timeSlot,
     problem: problem || '',
-    doctor_remark: '',
+    doctor_remark: 'Pending',
     prescriptions: [],
     attachments: [],
     total_fee: 500,
@@ -313,7 +319,7 @@ app.get('/api/admin/all-appointments', (req, res) => {
 app.get('/api/doctor/:id/appointments', (req, res) => {
   const docId = req.params.id;
   const docApps = appointmentsDB.filter(a => a.doctorId === docId);
-  res.json(docApps.length > 0 ? docApps : appointmentsDB);
+  res.json(docApps);
 });
 
 app.post('/api/doctor/appointment/update-details', authenticateToken, authorizeRoles('DOCTOR', 'ADMIN'), upload.array('attachments'), (req, res) => {
@@ -324,7 +330,8 @@ app.post('/api/doctor/appointment/update-details', authenticateToken, authorizeR
   if (doctorRemark !== undefined) appItem.doctor_remark = doctorRemark;
   if (totalFee !== undefined) appItem.total_fee = Number(totalFee);
   if (depositAmount !== undefined) appItem.deposit_amount = Number(depositAmount);
-  appItem.balance_amount = appItem.total_fee - appItem.deposit_amount;
+  
+  appItem.balance_amount = (appItem.total_fee || 0) - (appItem.deposit_amount || 0);
   if (status) appItem.status = status;
 
   if (prescriptions) {
@@ -381,8 +388,8 @@ app.delete('/api/doctor/delete/:id', authenticateToken, authorizeRoles('ADMIN'),
 const clientBuildPath = path.join(__dirname, '../client/build');
 if (fs.existsSync(clientBuildPath)) {
   app.use(express.static(clientBuildPath));
-  app.get('/{0,}', (req, res) => {
-    res.sendFile(path.join(__dirname, '../client/build', 'index.html'));
+  app.get('/(.*)', (req, res) => { ... });
+    res.sendFile(path.join(clientBuildPath, 'index.html'));
   });
 } else {
   app.get('/', (req, res) => {
